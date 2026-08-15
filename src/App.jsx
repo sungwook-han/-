@@ -5,7 +5,7 @@ import {
   Search, MapPin, Loader2, ChevronDown, ChevronLeft, ChevronRight,
   ArrowUp, ArrowDown, AlertTriangle, Anchor, CloudRainWind, Navigation, Utensils, Compass, Maximize2, X,
 } from "lucide-react";
-
+ 
 // 내 위치를 못 가져올 때 수동 선택용 (내륙 포함 주요 도시)
 const FALLBACK_CITIES = [
   { name: "서울", lat: 37.5665, lon: 126.978 },
@@ -21,7 +21,7 @@ const FALLBACK_CITIES = [
   { name: "전주", lat: 35.8242, lon: 127.148 },
   { name: "제주", lat: 33.4996, lon: 126.5312 },
 ];
-
+ 
 // 가고 싶은 위치(목적지) 후보 — 물때 관측소 목록 (날씨+물때 둘 다 이 좌표 기준)
 const DESTINATIONS = [
   { code: "DT_0001", name: "인천", lat: 37.4526, lon: 126.5967 },
@@ -71,7 +71,7 @@ const DESTINATIONS = [
   { code: "DT_0068", name: "위도", lat: 35.6153, lon: 126.2989 },
   { code: "DT_0091", name: "포항", lat: 36.0375, lon: 129.365 },
 ];
-
+ 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -94,13 +94,13 @@ function AddressSearchBox({ onSelect }) {
   const [searching, setSearching] = useState(false);
   const ref = useRef(null);
   const abortRef = useRef(null);
-
+ 
   useEffect(() => {
     const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
-
+ 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return; }
     const t = setTimeout(() => {
@@ -116,7 +116,7 @@ function AddressSearchBox({ onSelect }) {
     }, 450);
     return () => clearTimeout(t);
   }, [query]);
-
+ 
   return (
     <div ref={ref} style={{ position: "relative", flex: 1, minWidth: 160 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(15,23,31,0.1)", border: "1px solid rgba(15,23,31,0.25)", borderRadius: 20, padding: "7px 12px" }}>
@@ -158,9 +158,9 @@ function AddressSearchBox({ onSelect }) {
     </div>
   );
 }
-
-
-
+ 
+ 
+ 
 function weatherMeta(code, isDay) {
   const day = isDay !== 0;
   const table = {
@@ -178,12 +178,12 @@ function weatherMeta(code, isDay) {
   };
   return table[code] || { label: "정보 없음", Icon: Cloud };
 }
-
+ 
 const EXTR_META = {
   "1": { label: "오전 고조", high: true }, "2": { label: "오전 저조", high: false },
   "3": { label: "오후 고조", high: true }, "4": { label: "오후 저조", high: false },
 };
-
+ 
 function ymd(d) { return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`; }
 function fmtDateLabel(d) { const days = ["일", "월", "화", "수", "목", "금", "토"]; return `${d.getMonth() + 1}월 ${d.getDate()}일 (${days[d.getDay()]})`; }
 function isSameDay(a, b) { return a.toDateString() === b.toDateString(); }
@@ -197,7 +197,7 @@ function moonPhaseIcon(d) {
 function timeToMinutes(t) { const d = new Date(t.replace(" ", "T")); return d.getHours() * 60 + d.getMinutes(); }
 function fmtTime(t) { const d = new Date(t.replace(" ", "T")); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
 function fmtHour(iso) { return `${new Date(iso).getHours()}시`; }
-
+ 
 function buildCurvePath(points, w, h, padY) {
   if (points.length < 2) return "";
   const xs = points.map((p) => (p.min / 1440) * w);
@@ -211,7 +211,7 @@ function buildCurvePath(points, w, h, padY) {
   }
   return d;
 }
-
+ 
 // ---------- 지도 (OpenStreetMap + Leaflet, 완전 무료 · 키/가입 불필요) ----------
 // 실제 프로젝트: npm install leaflet 후, main.jsx에 import "leaflet/dist/leaflet.css"; 추가
 function leafletDivIcon(L, color, label) {
@@ -225,7 +225,7 @@ function leafletDivIcon(L, color, label) {
     iconAnchor: [7, 7],
   });
 }
-
+ 
 function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height = 240 }) {
   const [L, setL] = useState(null);
   const elRef = useRef(null);
@@ -233,13 +233,13 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
   const layersRef = useRef([]);
   const routeLayerRef = useRef(null);
   const poiLayersRef = useRef([]);
-
+ 
   useEffect(() => {
     let cancelled = false;
     import("leaflet").then((mod) => { if (!cancelled) setL(mod.default || mod); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
-
+ 
   useEffect(() => {
     if (!L || !elRef.current || mapRef.current) return;
     mapRef.current = L.map(elRef.current, { zoomControl: true, attributionControl: true }).setView([36.5, 127.8], 6.4);
@@ -248,14 +248,14 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
       maxZoom: 19,
     }).addTo(mapRef.current);
   }, [L]);
-
+ 
   // 컨테이너 크기가 바뀔 때(전체화면 전환 등) 지도 다시 계산
   useEffect(() => {
     if (!mapRef.current) return;
     const t = setTimeout(() => mapRef.current.invalidateSize(), 80);
     return () => clearTimeout(t);
   }, [height]);
-
+ 
   useEffect(() => {
     if (!L || !mapRef.current) return;
     if (routeLayerRef.current) { mapRef.current.removeLayer(routeLayerRef.current); routeLayerRef.current = null; }
@@ -263,7 +263,7 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
       routeLayerRef.current = L.polyline(route, { color: routeColor, weight: 4, opacity: 0.85, dashArray: "1,8", lineCap: "round" }).addTo(mapRef.current);
     }
   }, [L, route, routeColor]);
-
+ 
   useEffect(() => {
     if (!L || !mapRef.current) return;
     poiLayersRef.current.forEach((m) => mapRef.current.removeLayer(m));
@@ -275,7 +275,7 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
       poiLayersRef.current.push(m);
     });
   }, [L, poiMarkers]);
-
+ 
   useEffect(() => {
     if (!L || !mapRef.current) return;
     layersRef.current.forEach((m) => mapRef.current.removeLayer(m));
@@ -289,9 +289,9 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
     if (pts.length === 2) mapRef.current.fitBounds(pts, { padding: [40, 40], maxZoom: 10 });
     else if (pts.length === 1) mapRef.current.setView(pts[0], 9);
   }, [L, markers]);
-
+ 
   const heightStyle = typeof height === "number" ? `${height}px` : height;
-
+ 
   if (!L) {
     return (
       <div style={{ height: heightStyle, borderRadius: 12, background: "rgba(15,23,31,0.06)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12.5, opacity: 0.6, padding: 16 }}>
@@ -301,11 +301,11 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
   }
   return <div ref={elRef} style={{ height: heightStyle, borderRadius: 12, overflow: "hidden" }} />;
 }
-
+ 
 function SectionCard({ children, accent }) {
   return <div style={{ background: "#FAFAFA", border: `1px solid ${accent ? accent + "55" : "rgba(15,23,31,0.1)"}`, borderRadius: 16, padding: "18px 16px", boxShadow: "0 1px 3px rgba(15,23,31,0.04)" }}>{children}</div>;
 }
-
+ 
 function LocationPicker({ label, value, onChange, list, matchKey = "name" }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -342,13 +342,13 @@ function LocationPicker({ label, value, onChange, list, matchKey = "name" }) {
     </div>
   );
 }
-
+ 
 // 좌표 기반 날씨 표시 (내 위치 / 목적지 공용)
 function WeatherBlock({ lat, lon }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
+ 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -359,7 +359,7 @@ function WeatherBlock({ lat, lon }) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [lat, lon]);
-
+ 
   const meta = data ? weatherMeta(data.current.weather_code, data.current.is_day) : null;
   const hourly = useMemo(() => {
     if (!data) return [];
@@ -368,11 +368,11 @@ function WeatherBlock({ lat, lon }) {
     if (idx === -1) idx = 0;
     return data.hourly.time.slice(idx, idx + 6).map((t, i) => ({ time: t, temp: Math.round(data.hourly.temperature_2m[idx + i]), code: data.hourly.weather_code[idx + i] }));
   }, [data]);
-
+ 
   if (loading) return <div style={{ textAlign: "center", padding: "18px 0", opacity: 0.7 }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /></div>;
   if (error) return <div style={{ textAlign: "center", padding: "14px 0", fontSize: 12.5, opacity: 0.7 }}>{error}</div>;
   if (!data) return null;
-
+ 
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
@@ -410,14 +410,14 @@ function WeatherBlock({ lat, lon }) {
     </>
   );
 }
-
+ 
 // 물때 블록 (목적지 전용)
 function TideBlock({ station }) {
   const [date, setDate] = useState(new Date());
   const [items, setItems] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
+ 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError(""); setItems(null);
@@ -436,12 +436,12 @@ function TideBlock({ station }) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [station, date]);
-
+ 
   const points = useMemo(() => {
     if (!items) return [];
     return items.map((it) => ({ time: it.predcDt, min: timeToMinutes(it.predcDt), val: parseFloat(it.predcTdlvVl), meta: EXTR_META[it.extrSe] || { label: "-", high: null } })).sort((a, b) => a.min - b.min);
   }, [items]);
-
+ 
   const curveD = useMemo(() => {
     if (points.length < 2) return "";
     const vals = points.map((p) => p.val);
@@ -449,10 +449,10 @@ function TideBlock({ station }) {
     arr.minVal = Math.min(...vals); arr.maxVal = Math.max(...vals);
     return buildCurvePath(arr, 500, 110, 18);
   }, [points]);
-
+ 
   const today = new Date();
   const nowMin = today.getHours() * 60 + today.getMinutes();
-
+ 
   return (
     <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(15,23,31,0.1)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -465,7 +465,7 @@ function TideBlock({ station }) {
           <button onClick={() => setDate((d) => new Date(d.getTime() + 86400000))} style={{ background: "rgba(15,23,31,0.08)", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", color: "#1A1F26" }}><ChevronRight size={12} /></button>
         </div>
       </div>
-
+ 
       {loading && <div style={{ textAlign: "center", padding: "16px 0" }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /></div>}
       {!loading && error && (
         <div style={{ display: "flex", gap: 8, background: "rgba(224,142,69,0.15)", border: "1px solid rgba(224,142,69,0.4)", borderRadius: 10, padding: "10px 12px", fontSize: 12 }}>
@@ -507,7 +507,7 @@ function TideBlock({ station }) {
     </div>
   );
 }
-
+ 
 const SPOT_TYPES = {
   attraction: { label: "명소", color: "#F4C463", group: "sight" },
   viewpoint: { label: "전망대", color: "#F4C463", group: "sight" },
@@ -525,7 +525,7 @@ const SPOT_TYPES = {
   bar: { label: "바", color: "#E85D75", group: "food" },
   pub: { label: "펍", color: "#E85D75", group: "food" },
 };
-
+ 
 function classifySpot(tags) {
   if (tags.amenity && SPOT_TYPES[tags.amenity]) return tags.amenity;
   if (tags.tourism && SPOT_TYPES[tags.tourism]) return tags.tourism;
@@ -534,12 +534,12 @@ function classifySpot(tags) {
   if (tags.leisure === "park") return "park";
   return "attraction";
 }
-
+ 
 // 카카오 로컬 API로 맛집 보강 (프록시 /api/places 필요 — 배포 전엔 실패하고 OSM 결과로 자동 대체돼요)
 function useKakaoFood(dest) {
   const [items, setItems] = useState(null); // null = 아직 시도 안 함/실패, [] = 성공했지만 결과 없음
   const [loading, setLoading] = useState(false);
-
+ 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -570,16 +570,16 @@ function useKakaoFood(dest) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [dest]);
-
+ 
   return { items, loading };
 }
-
+ 
 function useNearbyPlaces(dest) {
   const [sights, setSights] = useState([]);
   const [food, setFood] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
+ 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -594,12 +594,37 @@ function useNearbyPlaces(dest) {
   nwr["amenity"~"restaurant|cafe|fast_food|bar|pub"](around:${radius},${dest.lat},${dest.lon});
 );
 out center 80;`;
-    fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `data=${encodeURIComponent(query)}`,
-    })
-      .then((r) => r.json())
+ 
+    // 공용 Overpass 서버가 가끔 느리거나 막힐 수 있어서, 여러 미러 서버를 순서대로 시도해요
+    const endpoints = [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass.openstreetmap.ru/api/interpreter",
+    ];
+ 
+    async function fetchWithFallback() {
+      let lastErr = null;
+      for (const url of endpoints) {
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 20000);
+          const r = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `data=${encodeURIComponent(query)}`,
+            signal: ctrl.signal,
+          });
+          clearTimeout(t);
+          if (!r.ok) { lastErr = new Error(`HTTP ${r.status}`); continue; }
+          return await r.json();
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error("all endpoints failed");
+    }
+ 
+    fetchWithFallback()
       .then((data) => {
         if (cancelled) return;
         const parsed = (data.elements || [])
@@ -616,14 +641,14 @@ out center 80;`;
         setSights(parsed.filter((p) => (SPOT_TYPES[p.type] || {}).group === "sight").slice(0, 10));
         setFood(parsed.filter((p) => (SPOT_TYPES[p.type] || {}).group === "food").slice(0, 10));
       })
-      .catch(() => { if (!cancelled) setError("주변 정보를 불러오지 못했어요."); })
+      .catch(() => { if (!cancelled) setError("주변 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [dest]);
-
+ 
   return { sights, food, loading, error };
 }
-
+ 
 function PlaceListCard({ title, icon: Icon, accent, dest, items, loading, error, emptyText, sourceNote }) {
   return (
     <SectionCard accent={accent}>
@@ -665,14 +690,14 @@ function PlaceListCard({ title, icon: Icon, accent, dest, items, loading, error,
     </SectionCard>
   );
 }
-
+ 
 // 경로 정보 + 길찾기 앱 연결 (OSRM 데모 서버 — 무료, 키 불필요)
 function fmtDuration(sec) {
   const m = Math.round(sec / 60);
   if (m < 60) return `${m}분`;
   return `${Math.floor(m / 60)}시간 ${m % 60}분`;
 }
-
+ 
 const ROUTE_PROFILES = {
   driving: {
     label: "자동차",
@@ -691,14 +716,14 @@ const ROUTE_PROFILES = {
     appleFlag: "w",
   },
 };
-
+ 
 function NavigationPanel({ myPlace, dest, mode }) {
   const [route, setRoute] = useState(null);
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const profile = ROUTE_PROFILES[mode];
-
+ 
   useEffect(() => {
     if (!myPlace) { setRoute(null); setInfo(null); return; }
     let cancelled = false;
@@ -717,10 +742,10 @@ function NavigationPanel({ myPlace, dest, mode }) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [myPlace, dest, mode]);
-
+ 
   const fromName = myPlace?.name || "내 위치";
   const toName = dest.name;
-
+ 
   const kakaoUrl = myPlace
     ? `https://map.kakao.com/link/from/${encodeURIComponent(fromName)},${myPlace.lat},${myPlace.lon}/to/${encodeURIComponent(toName)},${dest.lat},${dest.lon}`
     : `https://map.kakao.com/link/to/${encodeURIComponent(toName)},${dest.lat},${dest.lon}`;
@@ -730,14 +755,14 @@ function NavigationPanel({ myPlace, dest, mode }) {
   const appleUrl = myPlace
     ? `https://maps.apple.com/?saddr=${myPlace.lat},${myPlace.lon}&daddr=${dest.lat},${dest.lon}&dirflg=${profile.appleFlag}`
     : `https://maps.apple.com/?daddr=${dest.lat},${dest.lon}`;
-
+ 
   return { route, info, loading, error, color: profile.color, kakaoUrl, googleUrl, appleUrl };
 }
-
+ 
 // ---------- 상단 위치 바 (내 위치 / 목적지를 언제든 여기서 변경) ----------
 function MyLocationEditor({ myPlace, setMyPlace, onDone }) {
   const [status, setStatus] = useState("idle");
-
+ 
   const requestLocation = () => {
     setStatus("loading");
     if (!navigator.geolocation) { setStatus("error"); return; }
@@ -758,7 +783,7 @@ function MyLocationEditor({ myPlace, setMyPlace, onDone }) {
       { timeout: 8000 }
     );
   };
-
+ 
   return (
     <div style={{ marginTop: 10, background: "rgba(15,23,31,0.04)", border: "1px solid rgba(15,23,31,0.1)", borderRadius: 12, padding: 12 }}>
       <button onClick={requestLocation} style={{ width: "100%", background: "#5AB8FF", border: "none", color: "#062024", borderRadius: 10, padding: "9px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: status === "error" ? 10 : 0 }}>
@@ -780,10 +805,10 @@ function MyLocationEditor({ myPlace, setMyPlace, onDone }) {
     </div>
   );
 }
-
+ 
 function LocationBar({ myPlace, setMyPlace, dest, setDest }) {
   const [editing, setEditing] = useState(null); // 'my' | 'dest' | null
-
+ 
   return (
     <div style={{ padding: "10px 20px 0", maxWidth: 560, margin: "0 auto" }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -810,7 +835,7 @@ function LocationBar({ myPlace, setMyPlace, dest, setDest }) {
           <MapPin size={13} /> {dest.name}
         </button>
       </div>
-
+ 
       {editing === "my" && <MyLocationEditor myPlace={myPlace} setMyPlace={setMyPlace} onDone={() => setEditing(null)} />}
       {editing === "dest" && (
         <div style={{ marginTop: 10, background: "rgba(15,23,31,0.04)", border: "1px solid rgba(15,23,31,0.1)", borderRadius: 12, padding: 12 }}>
@@ -820,7 +845,7 @@ function LocationBar({ myPlace, setMyPlace, dest, setDest }) {
     </div>
   );
 }
-
+ 
 // ---------- 하단 탭 바 ----------
 const TABS = [
   { key: "map", label: "지도", icon: MapPin, color: "#5AB8FF" },
@@ -828,7 +853,7 @@ const TABS = [
   { key: "tide", label: "물때", icon: Anchor, color: "#4FD6C0" },
   { key: "nearby", label: "주변", icon: Compass, color: "#C792EA" },
 ];
-
+ 
 function TabBar({ active, setActive }) {
   return (
     <div style={{
@@ -857,21 +882,21 @@ function TabBar({ active, setActive }) {
     </div>
   );
 }
-
+ 
 export default function WeatherTideApp() {
   const [myPlace, setMyPlace] = useState(null);
   const [dest, setDest] = useState(DESTINATIONS[0]);
   const [mode, setMode] = useState("driving");
   const [tab, setTab] = useState("map");
   const [mapFullscreen, setMapFullscreen] = useState(false);
-
+ 
   const { route, info, loading: routeLoading, error: routeError, color: routeColor, kakaoUrl, googleUrl, appleUrl } = NavigationPanel({ myPlace, dest, mode });
   const { sights, food: osmFood, loading: placesLoading, error: placesError } = useNearbyPlaces(dest);
   const { items: kakaoFood, loading: kakaoFoodLoading } = useKakaoFood(dest);
   const food = kakaoFood && kakaoFood.length > 0 ? kakaoFood : osmFood;
   const foodSource = kakaoFood && kakaoFood.length > 0 ? "kakao" : "osm";
   const { station: nearestStation, distanceKm: nearestKm } = useMemo(() => findNearestStation(dest.lat, dest.lon), [dest]);
-
+ 
   const markers = [
     myPlace ? { ...myPlace, color: "#5AB8FF", label: `내 위치${myPlace.name && myPlace.name !== "내 위치" ? " · " + myPlace.name : ""}` } : null,
     { ...dest, color: "#F4C463", label: `가고싶은 위치 · ${dest.name}` },
@@ -879,9 +904,9 @@ export default function WeatherTideApp() {
   const poiMarkers = tab === "map" || tab === "nearby"
     ? [...sights, ...food].map((s) => ({ ...s, color: (SPOT_TYPES[s.type] || SPOT_TYPES.attraction).color, typeLabel: (SPOT_TYPES[s.type] || SPOT_TYPES.attraction).label }))
     : [];
-
+ 
   const sec = (key) => ({ display: tab === key ? "flex" : "none", flexDirection: "column", gap: 16 });
-
+ 
   return (
     <div style={{ minHeight: "100%", fontFamily: "'Noto Sans KR', sans-serif", background: "#FFFFFF", color: "#1A1F26" }}>
       <style>{`
@@ -895,13 +920,13 @@ export default function WeatherTideApp() {
         .nav-btn:hover { background: rgba(15,23,31,0.16) !important; }
         .nav-btn:active { transform: scale(0.97); }
       `}</style>
-
+ 
       <div style={{ padding: "20px 20px 0", textAlign: "center" }}>
         <h1 className="serif" style={{ fontSize: 19, fontWeight: 900, margin: 0 }}>가족여행</h1>
       </div>
-
+ 
       <LocationBar myPlace={myPlace} setMyPlace={setMyPlace} dest={dest} setDest={setDest} />
-
+ 
       <div style={{ padding: "14px 20px 90px", maxWidth: 560, margin: "0 auto" }}>
         {/* 지도 탭 */}
         <div style={sec("map")}>
@@ -924,7 +949,7 @@ export default function WeatherTideApp() {
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#5AB8FF", display: "inline-block" }} />내 위치</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#F4C463", display: "inline-block" }} />{dest.name}</span>
             </div>
-
+ 
             {myPlace && (
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(15,23,31,0.1)" }}>
                 <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 10 }}>
@@ -960,7 +985,7 @@ export default function WeatherTideApp() {
             )}
           </SectionCard>
         </div>
-
+ 
         {/* 날씨 탭 */}
         <div style={sec("weather")}>
           <SectionCard accent="#5AB8FF">
@@ -978,7 +1003,7 @@ export default function WeatherTideApp() {
             <WeatherBlock lat={dest.lat} lon={dest.lon} />
           </SectionCard>
         </div>
-
+ 
         {/* 물때 탭 */}
         <div style={sec("tide")}>
           <SectionCard accent="#4FD6C0">
@@ -991,14 +1016,14 @@ export default function WeatherTideApp() {
             <TideBlock station={nearestStation} />
           </SectionCard>
         </div>
-
+ 
         {/* 주변 탭 */}
         <div style={sec("nearby")}>
           <PlaceListCard title="핫플" icon={MapPin} accent="#C792EA" dest={dest} items={sights} loading={placesLoading} error={placesError} emptyText="반경 5km 안에서 등록된 장소를 찾지 못했어요." />
           <PlaceListCard title="맛집" icon={Utensils} accent="#FF7A59" dest={dest} items={food} loading={placesLoading || kakaoFoodLoading} error={placesError} emptyText="반경 5km 안에서 등록된 음식점을 찾지 못했어요." sourceNote={foodSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} />
         </div>
       </div>
-
+ 
       {mapFullscreen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "#fff" }}>
           <LeafletMap markers={markers} route={route} routeColor={routeColor} poiMarkers={poiMarkers} height="100vh" />
@@ -1023,12 +1048,13 @@ export default function WeatherTideApp() {
           </div>
         </div>
       )}
-
+ 
       <TabBar active={tab} setActive={setTab} />
-
+ 
       <div style={{ textAlign: "center", fontSize: 9.5, opacity: 0.35, padding: "0 20px 90px" }}>
         날씨: Open-Meteo · 물때: 국립해양조사원(공공데이터포털) · 지도/핫플: OpenStreetMap · 경로: OSRM
       </div>
     </div>
   );
 }
+ 
