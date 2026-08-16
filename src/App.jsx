@@ -430,7 +430,7 @@ function TideBlock({ station }) {
       })
       .then(({ json, httpOk }) => {
         if (cancelled) return;
-        const body = json?.response?.body, header = json?.response?.header;
+        const body = json?.body, header = json?.header;
         if (!body) {
           const detail = header?.resultMsg || json?.error || json?.detail || JSON.stringify(json).slice(0, 200);
           setError(`${httpOk ? "" : "[서버 오류] "}${detail}`);
@@ -898,6 +898,25 @@ export default function WeatherTideApp() {
   const [mode, setMode] = useState("driving");
   const [tab, setTab] = useState("map");
   const [mapFullscreen, setMapFullscreen] = useState(false);
+ 
+  // 앱을 열면 버튼 클릭 없이 바로 내 위치를 시도해요 (권한 거부 시 조용히 무시 — 상단 칩에서 수동으로 다시 시도 가능)
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude, lon = pos.coords.longitude;
+        let name = "내 위치";
+        try {
+          const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=ko`);
+          const j = await r.json();
+          name = j.locality || j.city || j.principalSubdivision || "내 위치";
+        } catch {}
+        setMyPlace({ lat, lon, name });
+      },
+      () => {},
+      { timeout: 8000 }
+    );
+  }, []);
  
   const { route, info, loading: routeLoading, error: routeError, color: routeColor, kakaoUrl, googleUrl, appleUrl } = NavigationPanel({ myPlace, dest, mode });
   const { sights, food: osmFood, loading: placesLoading, error: placesError } = useNearbyPlaces(dest);
