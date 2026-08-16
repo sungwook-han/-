@@ -194,6 +194,18 @@ function moonPhaseIcon(d) {
   const phase = (((days % synodic) + synodic) % synodic) / synodic;
   return ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"][Math.round(phase * 8) % 8];
 }
+// 음력 기준 물때 번호 참고치 (남해안 통상 계산법: 음력일+7 방식) — 달의 위상으로 음력일을 근사 계산.
+// 지역(서해/남해/동해)과 계산 관행에 따라 실제 물때표와 1~2 정도 차이날 수 있는 참고값이에요.
+function muldaeInfo(d) {
+  const synodic = 29.53058867;
+  const ref = new Date(Date.UTC(2000, 0, 6, 18, 14));
+  const days = (d - ref) / 86400000;
+  const moonAge = ((days % synodic) + synodic) % synodic;
+  const lunarDay = Math.floor(moonAge) + 1;
+  const n = ((lunarDay + 6) % 15) + 1;
+  const label = n === 7 ? "사리" : n === 15 ? "조금" : `${n}물`;
+  return { n, label };
+}
 function timeToMinutes(t) { const d = new Date(t.replace(" ", "T")); return d.getHours() * 60 + d.getMinutes(); }
 function fmtTime(t) { const d = new Date(t.replace(" ", "T")); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
 function fmtHour(iso) { return `${new Date(iso).getHours()}시`; }
@@ -505,7 +517,10 @@ function TideBlock({ station }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={() => setDate((d) => new Date(d.getTime() - 86400000))} style={{ background: "rgba(15,23,31,0.08)", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", color: "#1A1F26" }}><ChevronLeft size={12} /></button>
-          <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>{moonPhaseIcon(date)} {fmtDateLabel(date)}</span>
+          <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+            {moonPhaseIcon(date)} {fmtDateLabel(date)}
+            <span style={{ fontSize: 10.5, color: "#9C7A3C", background: "rgba(156,122,60,0.12)", borderRadius: 6, padding: "1px 6px", marginLeft: 2 }}>{muldaeInfo(date).label}</span>
+          </span>
           <button onClick={() => setDate((d) => new Date(d.getTime() + 86400000))} style={{ background: "rgba(15,23,31,0.08)", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", color: "#1A1F26" }}><ChevronRight size={12} /></button>
         </div>
       </div>
@@ -552,6 +567,114 @@ function TideBlock({ station }) {
   );
 }
  
+// ---------- 이번 주 물때표 (7일치 고조/저조 한눈에 보기) ----------
+function useWeekTide(station) {
+  const [days, setDays] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+ 
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    const dates = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      return d;
+    });
+ 
+    Promise.all(
+      dates.map((d) =>
+        fetch(`/api/tide?obsCode=${station.code}&reqDate=${ymd(d)}`)
+          .then((r) => r.json())
+          .then((json) => {
+            const body = json?.body, header = json?.header;
+            if (!body || header?.resultCode !== "00") return { date: d, points: [] };
+            let raw = body.items?.item || [];
+            if (!Array.isArray(raw)) raw = [raw];
+            const points = raw
+              .map((it) => ({ min: timeToMinutes(it.predcDt), time: it.predcDt, meta: EXTR_META[it.extrSe] || { label: "-", high: null } }))
+              .sort((a, b) => a.min - b.min);
+            return { date: d, points };
+          })
+          .catch(() => ({ date: d, points: [] }))
+      )
+    )
+      .then((results) => { if (!cancelled) setDays(results); })
+      .catch(() => { if (!cancelled) setError("주간 물때 정보를 불러오지 못했어요."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [station]);
+ 
+  return { days, loading, error };
+}
+ 
+function TideTable({ station }) {
+  const { days, loading, error } = useWeekTide(station);
+  const today = new Date();
+ 
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(15,23,31,0.1)" }}>
+      <div className="serif" style={{ fontSize: 14, fontWeight: 900, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <Anchor size={14} color="#4FD6C0" /> 이번 주 물때표
+      </div>
+ 
+      {loading && <div style={{ textAlign: "center", padding: "16px 0" }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /></div>}
+      {!loading && error && (
+        <div style={{ display: "flex", gap: 8, background: "rgba(224,142,69,0.15)", border: "1px solid rgba(224,142,69,0.4)", borderRadius: 10, padding: "10px 12px", fontSize: 12 }}>
+          <AlertTriangle size={14} style={{ flexShrink: 0, color: "#E08E45" }} /><div>{error}</div>
+        </div>
+      )}
+      {!loading && !error && days.length > 0 && (
+        <div style={{ border: "1px solid rgba(15,23,31,0.1)", borderRadius: 12, overflow: "hidden" }}>
+          {days.map((d, i) => {
+            const highs = d.points.filter((p) => p.meta.high).map((p) => fmtTime(p.time));
+            const lows = d.points.filter((p) => p.meta.high === false).map((p) => fmtTime(p.time));
+            const isToday = isSameDay(d.date, today);
+            return (
+              <div
+                key={i}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "10px 12px",
+                  borderTop: i === 0 ? "none" : "1px solid rgba(15,23,31,0.08)",
+                  background: isToday ? "rgba(79,214,192,0.08)" : "transparent",
+                }}
+              >
+                <div style={{ width: 78, flexShrink: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>{fmtDateLabel(d.date)}</div>
+                  <div style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 3, marginTop: 2 }}>
+                    <span>{moonPhaseIcon(d.date)}</span>
+                    <span style={{ fontSize: 10, color: "#9C7A3C", background: "rgba(156,122,60,0.12)", borderRadius: 5, padding: "1px 5px" }}>{muldaeInfo(d.date).label}</span>
+                  </div>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {d.points.length === 0 ? (
+                    <div style={{ fontSize: 11, opacity: 0.5 }}>정보 없음</div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 11, display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginBottom: 3 }}>
+                        <span style={{ color: "#4FD6C0", fontWeight: 700, flexShrink: 0 }}>고조</span>
+                        <span className="sg" style={{ opacity: 0.85 }}>{highs.join(" · ") || "-"}</span>
+                      </div>
+                      <div style={{ fontSize: 11, display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ color: "#E08E45", fontWeight: 700, flexShrink: 0 }}>저조</span>
+                        <span className="sg" style={{ opacity: 0.85 }}>{lows.join(" · ") || "-"}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ fontSize: 9.5, opacity: 0.45, marginTop: 8, lineHeight: 1.4 }}>
+        * 물때 번호는 달의 위상으로 계산한 참고값이에요(남해안 통상 계산법 기준). 지역과 계산 방식에 따라 실제와 1~2 정도 차이날 수 있어요.
+      </div>
+    </div>
+  );
+}
+ 
 const SPOT_TYPES = {
   attraction: { label: "명소", color: "#F4C463", group: "sight" },
   viewpoint: { label: "전망대", color: "#F4C463", group: "sight" },
@@ -588,20 +711,30 @@ function useKakaoPlaces(dest) {
   const [sights, setSights] = useState([]);
   const [food, setFood] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
  
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError("");
     Promise.all(
       Object.keys(KAKAO_CATS).map((cat) =>
         fetch(`/api/places?lat=${dest.lat}&lon=${dest.lon}&category=${cat}&radius=5000`)
-          .then((r) => (r.ok ? r.json() : Promise.reject()))
-          .then((j) => ({ cat, docs: j.documents || [] }))
-          .catch(() => ({ cat, docs: [] }))
+          .then(async (r) => {
+            const text = await r.text();
+            let j;
+            try { j = JSON.parse(text); } catch { j = { error: `JSON 아님: ${text.slice(0, 150)}` }; }
+            if (!r.ok || j.error) return { cat, docs: [], err: j.error || `HTTP ${r.status}` };
+            return { cat, docs: j.documents || [], err: null };
+          })
+          .catch((e) => ({ cat, docs: [], err: e.message || "요청 실패" }))
       )
     )
       .then((results) => {
         if (cancelled) return;
+        const firstErr = results.find((r) => r.err)?.err;
+        const anyDocs = results.some((r) => r.docs.length > 0);
+        if (firstErr && !anyDocs) setError(firstErr);
         const parsed = results.flatMap(({ cat, docs }) =>
           docs.map((d) => ({
             id: d.id,
@@ -619,12 +752,12 @@ function useKakaoPlaces(dest) {
         setSights(bySight);
         setFood(byFood);
       })
-      .catch(() => { if (!cancelled) { setSights([]); setFood([]); } })
+      .catch((e) => { if (!cancelled) { setSights([]); setFood([]); setError(e.message || "요청 실패"); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [dest]);
  
-  return { sights, food, loading };
+  return { sights, food, loading, error };
 }
  
 function useNearbyPlaces(dest) {
@@ -706,15 +839,17 @@ out center 80;`;
   return { sights, food, loading, error };
 }
  
-function PlaceListCard({ title, icon: Icon, accent, dest, items, loading, error, emptyText, sourceNote }) {
+function PlaceListCard({ title, icon: Icon, accent, dest, items, loading, error, emptyText, sourceNote, debugNote }) {
   return (
     <SectionCard accent={accent}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div className="serif" style={{ fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", gap: 6 }}>
           <Icon size={15} color={accent} /> {dest.name} 근처 {title}
         </div>
         {sourceNote && <span style={{ fontSize: 10, opacity: 0.5 }}>{sourceNote}</span>}
       </div>
+      {debugNote && <div style={{ fontSize: 10, color: "#E14F4F", marginBottom: 8 }}>카카오 호출 실패: {debugNote}</div>}
+      <div style={{ marginTop: debugNote ? 0 : 12 }} />
       {loading && <div style={{ textAlign: "center", padding: "16px 0" }}><Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /></div>}
       {!loading && error && <div style={{ fontSize: 12.5, opacity: 0.7, textAlign: "center", padding: "10px 0" }}>{error}</div>}
       {!loading && !error && items.length === 0 && (
@@ -968,7 +1103,7 @@ export default function WeatherTideApp() {
  
   const { route, info, loading: routeLoading, error: routeError, color: routeColor, kakaoUrl, googleUrl, appleUrl } = NavigationPanel({ myPlace, dest, mode });
   const { sights: osmSights, food: osmFood, loading: osmLoading, error: osmError } = useNearbyPlaces(dest);
-  const { sights: kakaoSights, food: kakaoFood, loading: kakaoLoading } = useKakaoPlaces(dest);
+  const { sights: kakaoSights, food: kakaoFood, loading: kakaoLoading, error: kakaoError } = useKakaoPlaces(dest);
  
   const sights = kakaoSights.length > 0 ? kakaoSights : osmSights;
   const sightsLoading = kakaoLoading || (kakaoSights.length === 0 && osmLoading);
@@ -1019,14 +1154,14 @@ export default function WeatherTideApp() {
                 <MapPin size={16} color="#1A1F26" /> 지도
               </div>
               <button
-                onClick={() => setMapFullscreen(true)}
+                onClick={() => setMapFullscreen((v) => !v)}
                 style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 8, padding: "5px 9px", fontSize: 11.5, fontWeight: 700, color: "#1A1F26", cursor: "pointer" }}
               >
-                <Maximize2 size={12} /> 전체화면
+                {mapFullscreen ? <><X size={12} /> 닫기</> : <><Maximize2 size={12} /> 크게 보기</>}
               </button>
             </div>
             <div style={{ position: "relative" }}>
-              <LeafletMap markers={markers} route={route} routeColor={routeColor} poiMarkers={poiMarkers} height={240} />
+              <LeafletMap markers={markers} route={route} routeColor={routeColor} poiMarkers={poiMarkers} height={mapFullscreen ? "75vh" : 240} />
             </div>
             <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 10, fontSize: 11 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#5AB8FF", display: "inline-block" }} />내 위치</span>
@@ -1097,40 +1232,16 @@ export default function WeatherTideApp() {
               가장 가까운 조위관측소: {nearestStation.name} (약 {nearestKm.toFixed(0)}km)
             </div>
             <TideBlock station={nearestStation} />
+            <TideTable station={nearestStation} />
           </SectionCard>
         </div>
  
         {/* 주변 탭 */}
         <div style={sec("nearby")}>
-          <PlaceListCard title="핫플" icon={MapPin} accent="#C792EA" dest={dest} items={sights} loading={sightsLoading} error={sights.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 장소를 찾지 못했어요." sourceNote={sightsSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} />
-          <PlaceListCard title="맛집" icon={Utensils} accent="#FF7A59" dest={dest} items={food} loading={foodLoading} error={food.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 음식점을 찾지 못했어요." sourceNote={foodSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} />
+          <PlaceListCard title="핫플" icon={MapPin} accent="#C792EA" dest={dest} items={sights} loading={sightsLoading} error={sights.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 장소를 찾지 못했어요." sourceNote={sightsSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} debugNote={sightsSource === "osm" ? kakaoError : ""} />
+          <PlaceListCard title="맛집" icon={Utensils} accent="#FF7A59" dest={dest} items={food} loading={foodLoading} error={food.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 음식점을 찾지 못했어요." sourceNote={foodSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} debugNote={foodSource === "osm" ? kakaoError : ""} />
         </div>
       </div>
- 
-      {mapFullscreen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "#fff" }}>
-          <LeafletMap markers={markers} route={route} routeColor={routeColor} poiMarkers={poiMarkers} height="100vh" />
-          <button
-            onClick={() => setMapFullscreen(false)}
-            style={{
-              position: "absolute", top: 16, right: 16, zIndex: 210,
-              width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.96)",
-              border: "1px solid rgba(15,23,31,0.15)", boxShadow: "0 4px 14px rgba(15,23,31,0.18)",
-              display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-            }}
-          >
-            <X size={18} color="#1A1F26" />
-          </button>
-          <div style={{ position: "absolute", top: 16, left: 16, zIndex: 210, display: "flex", gap: 8, fontSize: 11 }}>
-            <span style={{ background: "rgba(255,255,255,0.96)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 8, padding: "5px 9px", display: "flex", alignItems: "center", gap: 5, boxShadow: "0 2px 8px rgba(15,23,31,0.1)" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#5AB8FF", display: "inline-block" }} />내 위치
-            </span>
-            <span style={{ background: "rgba(255,255,255,0.96)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 8, padding: "5px 9px", display: "flex", alignItems: "center", gap: 5, boxShadow: "0 2px 8px rgba(15,23,31,0.1)" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#F4C463", display: "inline-block" }} />{dest.name}
-            </span>
-          </div>
-        </div>
-      )}
  
       <TabBar active={tab} setActive={setTab} />
  
