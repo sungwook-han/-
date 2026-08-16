@@ -422,17 +422,26 @@ function TideBlock({ station }) {
     let cancelled = false;
     setLoading(true); setError(""); setItems(null);
     fetch(`/api/tide?obsCode=${station.code}&reqDate=${ymd(date)}`)
-      .then((r) => r.json())
-      .then((json) => {
+      .then(async (r) => {
+        const text = await r.text();
+        let json;
+        try { json = JSON.parse(text); } catch { throw new Error(`서버 응답이 JSON이 아니에요: ${text.slice(0, 200)}`); }
+        return { json, httpOk: r.ok };
+      })
+      .then(({ json, httpOk }) => {
         if (cancelled) return;
         const body = json?.response?.body, header = json?.response?.header;
-        if (!body) { setError(header?.resultMsg || json?.error || "응답을 확인할 수 없어요."); return; }
+        if (!body) {
+          const detail = header?.resultMsg || json?.error || json?.detail || JSON.stringify(json).slice(0, 200);
+          setError(`${httpOk ? "" : "[서버 오류] "}${detail}`);
+          return;
+        }
         if (header?.resultCode !== "00") { setError(`${header?.resultMsg || "오류"} (${header?.resultCode})`); return; }
         let raw = body.items?.item || [];
         if (!Array.isArray(raw)) raw = [raw];
         setItems(raw);
       })
-      .catch(() => { if (!cancelled) setError("프록시(/api/tide) 미배포 상태예요. Vercel 배포 후 정상 작동해요."); })
+      .catch((e) => { if (!cancelled) setError(e.message || "요청 중 오류가 발생했어요."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [station, date]);
