@@ -558,6 +558,7 @@ const SPOT_TYPES = {
   museum: { label: "박물관", color: "#C792EA", group: "sight" },
   gallery: { label: "갤러리", color: "#C792EA", group: "sight" },
   artwork: { label: "예술작품", color: "#C792EA", group: "sight" },
+  culture: { label: "문화시설", color: "#C792EA", group: "sight" },
   zoo: { label: "동물원", color: "#7ED957", group: "sight" },
   theme_park: { label: "테마파크", color: "#F4C463", group: "sight" },
   historic: { label: "역사유적", color: "#E08E45", group: "sight" },
@@ -579,43 +580,51 @@ function classifySpot(tags) {
   return "attraction";
 }
  
-// 카카오 로컬 API로 맛집 보강 (프록시 /api/places 필요 — 배포 전엔 실패하고 OSM 결과로 자동 대체돼요)
-function useKakaoFood(dest) {
-  const [items, setItems] = useState(null); // null = 아직 시도 안 함/실패, [] = 성공했지만 결과 없음
+// 카카오 로컬 API로 핫플+맛집을 한 번에 가져옴 (프록시 /api/places 필요 — 실패하면 OSM 결과로 자동 대체)
+// AT4: 관광명소, CT1: 문화시설, FD6: 음식점, CE7: 카페
+const KAKAO_CATS = { AT4: "attraction", CT1: "culture", FD6: "restaurant", CE7: "cafe" };
+ 
+function useKakaoPlaces(dest) {
+  const [sights, setSights] = useState([]);
+  const [food, setFood] = useState([]);
   const [loading, setLoading] = useState(false);
  
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     Promise.all(
-      ["FD6", "CE7"].map((cat) =>
-        fetch(`/api/places?lat=${dest.lat}&lon=${dest.lon}&category=${cat}&radius=5000`).then((r) => (r.ok ? r.json() : Promise.reject()))
+      Object.keys(KAKAO_CATS).map((cat) =>
+        fetch(`/api/places?lat=${dest.lat}&lon=${dest.lon}&category=${cat}&radius=5000`)
+          .then((r) => (r.ok ? r.json() : Promise.reject()))
+          .then((j) => ({ cat, docs: j.documents || [] }))
+          .catch(() => ({ cat, docs: [] }))
       )
     )
-      .then(([foodRes, cafeRes]) => {
+      .then((results) => {
         if (cancelled) return;
-        const docs = [...(foodRes.documents || []), ...(cafeRes.documents || [])];
-        const parsed = docs
-          .map((d) => ({
+        const parsed = results.flatMap(({ cat, docs }) =>
+          docs.map((d) => ({
             id: d.id,
             name: d.place_name,
             lat: parseFloat(d.y),
             lon: parseFloat(d.x),
-            type: d.category_group_code === "CE7" ? "cafe" : "restaurant",
-            distanceKm: (parseFloat(d.distance) || haversineKm(dest.lat, dest.lon, parseFloat(d.y), parseFloat(d.x)) * 1000) / 1000,
+            type: KAKAO_CATS[cat],
+            distanceKm: (parseFloat(d.distance) || 0) / 1000,
             phone: d.phone,
             placeUrl: d.place_url,
           }))
-          .sort((a, b) => a.distanceKm - b.distanceKm)
-          .slice(0, 10);
-        setItems(parsed);
+        );
+        const bySight = parsed.filter((p) => p.type === "attraction" || p.type === "culture").sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 10);
+        const byFood = parsed.filter((p) => p.type === "restaurant" || p.type === "cafe").sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 10);
+        setSights(bySight);
+        setFood(byFood);
       })
-      .catch(() => { if (!cancelled) setItems(null); })
+      .catch(() => { if (!cancelled) { setSights([]); setFood([]); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [dest]);
  
-  return { items, loading };
+  return { sights, food, loading };
 }
  
 function useNearbyPlaces(dest) {
@@ -639,33 +648,37 @@ function useNearbyPlaces(dest) {
 );
 out center 80;`;
  
-    // 공용 Overpass 서버가 가끔 느리거나 막힐 수 있어서, 여러 미러 서버를 순서대로 시도해요
+    // 공용 Overpass 서버가 가끔 느리거나 막힐 수 있어서, 여러 미러 서버에 동시에 요청해서
+    // 가장 먼저 성공하는 응답을 사용해요 (순서대로 기다리지 않아서 훨씬 빨라요)
     const endpoints = [
       "https://overpass-api.de/api/interpreter",
       "https://overpass.kumi.systems/api/interpreter",
       "https://overpass.openstreetmap.ru/api/interpreter",
     ];
  
-    async function fetchWithFallback() {
-      let lastErr = null;
-      for (const url of endpoints) {
-        try {
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), 20000);
-          const r = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `data=${encodeURIComponent(query)}`,
-            signal: ctrl.signal,
-          });
-          clearTimeout(t);
-          if (!r.ok) { lastErr = new Error(`HTTP ${r.status}`); continue; }
-          return await r.json();
-        } catch (e) {
-          lastErr = e;
-        }
+    async function fetchOne(url) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 15000);
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: ctrl.signal,
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      } finally {
+        clearTimeout(t);
       }
-      throw lastErr || new Error("all endpoints failed");
+    }
+ 
+    async function fetchWithFallback() {
+      try {
+        return await Promise.any(endpoints.map(fetchOne));
+      } catch {
+        throw new Error("모든 서버가 응답하지 않았어요.");
+      }
     }
  
     fetchWithFallback()
@@ -954,10 +967,17 @@ export default function WeatherTideApp() {
   }, []);
  
   const { route, info, loading: routeLoading, error: routeError, color: routeColor, kakaoUrl, googleUrl, appleUrl } = NavigationPanel({ myPlace, dest, mode });
-  const { sights, food: osmFood, loading: placesLoading, error: placesError } = useNearbyPlaces(dest);
-  const { items: kakaoFood, loading: kakaoFoodLoading } = useKakaoFood(dest);
-  const food = kakaoFood && kakaoFood.length > 0 ? kakaoFood : osmFood;
-  const foodSource = kakaoFood && kakaoFood.length > 0 ? "kakao" : "osm";
+  const { sights: osmSights, food: osmFood, loading: osmLoading, error: osmError } = useNearbyPlaces(dest);
+  const { sights: kakaoSights, food: kakaoFood, loading: kakaoLoading } = useKakaoPlaces(dest);
+ 
+  const sights = kakaoSights.length > 0 ? kakaoSights : osmSights;
+  const sightsLoading = kakaoLoading || (kakaoSights.length === 0 && osmLoading);
+  const sightsSource = kakaoSights.length > 0 ? "kakao" : "osm";
+ 
+  const food = kakaoFood.length > 0 ? kakaoFood : osmFood;
+  const foodLoading = kakaoLoading || (kakaoFood.length === 0 && osmLoading);
+  const foodSource = kakaoFood.length > 0 ? "kakao" : "osm";
+ 
   const { station: nearestStation, distanceKm: nearestKm } = useMemo(() => findNearestStation(dest.lat, dest.lon), [dest]);
  
   const markers = [
@@ -1082,8 +1102,8 @@ export default function WeatherTideApp() {
  
         {/* 주변 탭 */}
         <div style={sec("nearby")}>
-          <PlaceListCard title="핫플" icon={MapPin} accent="#C792EA" dest={dest} items={sights} loading={placesLoading} error={placesError} emptyText="반경 5km 안에서 등록된 장소를 찾지 못했어요." />
-          <PlaceListCard title="맛집" icon={Utensils} accent="#FF7A59" dest={dest} items={food} loading={placesLoading || kakaoFoodLoading} error={placesError} emptyText="반경 5km 안에서 등록된 음식점을 찾지 못했어요." sourceNote={foodSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} />
+          <PlaceListCard title="핫플" icon={MapPin} accent="#C792EA" dest={dest} items={sights} loading={sightsLoading} error={sights.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 장소를 찾지 못했어요." sourceNote={sightsSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} />
+          <PlaceListCard title="맛집" icon={Utensils} accent="#FF7A59" dest={dest} items={food} loading={foodLoading} error={food.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 음식점을 찾지 못했어요." sourceNote={foodSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} />
         </div>
       </div>
  
@@ -1121,3 +1141,4 @@ export default function WeatherTideApp() {
   );
 }
  
+
