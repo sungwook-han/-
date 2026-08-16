@@ -413,7 +413,7 @@ function WeatherBlock({ lat, lon }) {
     let cancelled = false;
     setLoading(true);
     setError("");
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day&daily=precipitation_probability_max&hourly=temperature_2m,weather_code&timezone=Asia%2FSeoul&forecast_days=1`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day&daily=precipitation_probability_max,weather_code,temperature_2m_max,temperature_2m_min&hourly=temperature_2m,weather_code&timezone=Asia%2FSeoul&forecast_days=2`;
     fetch(url).then((r) => r.json()).then((j) => { if (!cancelled) setData(j); })
       .catch(() => { if (!cancelled) setError("날씨 정보를 불러오지 못했어요."); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -492,6 +492,21 @@ function WeatherBlock({ lat, lon }) {
           );
         })}
       </div>
+
+      {data.daily?.time?.[1] && (() => {
+        const tm = weatherMeta(data.daily.weather_code[1], 1);
+        return (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(15,23,31,0.08)", display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.7, width: 32 }}>내일</div>
+            <tm.Icon size={18} color="#4FD6C0" />
+            <div style={{ fontSize: 11.5, opacity: 0.75, flex: 1 }}>{tm.label}</div>
+            <div style={{ fontSize: 10.5, opacity: 0.6 }}>강수 {data.daily.precipitation_probability_max[1]}%</div>
+            <div className="sg" style={{ fontSize: 13, fontWeight: 700 }}>
+              {Math.round(data.daily.temperature_2m_min[1])}° / {Math.round(data.daily.temperature_2m_max[1])}°
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }
@@ -1140,8 +1155,9 @@ export default function WeatherTideApp() {
   }, []);
 
   const { route, info, loading: routeLoading, error: routeError, color: routeColor, kakaoUrl, googleUrl, appleUrl } = NavigationPanel({ myPlace, dest, mode });
-  const { sights: osmSights, food: osmFood, loading: osmLoading, error: osmError } = useNearbyPlaces(dest);
-  const { sights: kakaoSights, food: kakaoFood, loading: kakaoLoading, error: kakaoError } = useKakaoPlaces(dest);
+  const nearbyCenter = myPlace || dest; // 주변 탭은 내 위치(GPS)가 있으면 그걸 우선으로 검색해요
+  const { sights: osmSights, food: osmFood, loading: osmLoading, error: osmError } = useNearbyPlaces(nearbyCenter);
+  const { sights: kakaoSights, food: kakaoFood, loading: kakaoLoading, error: kakaoError } = useKakaoPlaces(nearbyCenter);
 
   const sights = kakaoSights.length > 0 ? kakaoSights : osmSights;
   const sightsLoading = kakaoLoading || (kakaoSights.length === 0 && osmLoading);
@@ -1206,39 +1222,43 @@ export default function WeatherTideApp() {
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#F4C463", display: "inline-block" }} />{dest.name}</span>
             </div>
 
-            {myPlace && (
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(15,23,31,0.1)" }}>
-                <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 10 }}>
-                  {Object.entries(ROUTE_PROFILES).map(([key, p]) => (
-                    <button key={key} onClick={() => setMode(key)}
-                      style={{ background: mode === key ? p.color : "rgba(15,23,31,0.08)", color: mode === key ? "#062024" : "#1A1F26", border: "none", borderRadius: 14, padding: "5px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                {routeLoading && <div style={{ textAlign: "center", fontSize: 12, opacity: 0.6, padding: "6px 0" }}><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> 경로 계산 중...</div>}
-                {!routeLoading && routeError && <div style={{ textAlign: "center", fontSize: 12, opacity: 0.6, padding: "6px 0" }}>{routeError}</div>}
-                {!routeLoading && info && (
-                  <div style={{ textAlign: "center", fontSize: 13, marginBottom: 12 }}>
-                    <span className="sg" style={{ fontWeight: 700 }}>{info.distanceKm.toFixed(1)}km</span>
-                    <span style={{ opacity: 0.5 }}> · </span>
-                    <span className="sg" style={{ fontWeight: 700 }}>{fmtDuration(info.durationSec)}</span>
-                    <span style={{ opacity: 0.5 }}> ({ROUTE_PROFILES[mode].label} 기준)</span>
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(15,23,31,0.1)" }}>
+              {myPlace && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 10 }}>
+                    {Object.entries(ROUTE_PROFILES).map(([key, p]) => (
+                      <button key={key} onClick={() => setMode(key)}
+                        style={{ background: mode === key ? p.color : "rgba(15,23,31,0.08)", color: mode === key ? "#062024" : "#1A1F26", border: "none", borderRadius: 14, padding: "5px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        {p.label}
+                      </button>
+                    ))}
                   </div>
-                )}
-                <div style={{ display: "flex", gap: 8 }}>
-                  {[{ label: "카카오맵", url: kakaoUrl }, { label: "구글맵", url: googleUrl }, { label: "애플맵", url: appleUrl }].map((b) => (
-                    <a key={b.label} href={b.url} target="_blank" rel="noopener noreferrer" className="nav-btn"
-                      style={{ flex: 1, textAlign: "center", background: "rgba(15,23,31,0.1)", border: "1px solid rgba(15,23,31,0.25)", borderRadius: 10, padding: "9px 4px", fontSize: 12.5, fontWeight: 700, color: "#1A1F26", textDecoration: "none" }}>
-                      {b.label}
-                    </a>
-                  ))}
+                  {routeLoading && <div style={{ textAlign: "center", fontSize: 12, opacity: 0.6, padding: "6px 0" }}><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> 경로 계산 중...</div>}
+                  {!routeLoading && routeError && <div style={{ textAlign: "center", fontSize: 12, opacity: 0.6, padding: "6px 0" }}>{routeError}</div>}
+                  {!routeLoading && info && (
+                    <div style={{ textAlign: "center", fontSize: 13, marginBottom: 12 }}>
+                      <span className="sg" style={{ fontWeight: 700 }}>{info.distanceKm.toFixed(1)}km</span>
+                      <span style={{ opacity: 0.5 }}> · </span>
+                      <span className="sg" style={{ fontWeight: 700 }}>{fmtDuration(info.durationSec)}</span>
+                      <span style={{ opacity: 0.5 }}> ({ROUTE_PROFILES[mode].label} 기준)</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {!myPlace && (
+                <div style={{ textAlign: "center", fontSize: 11, opacity: 0.5, marginBottom: 10 }}>
+                  내 위치를 설정하면 경로·거리도 같이 나와요 — 목적지는 이미 채워져 있어서 바로 길찾기 열 수 있어요
                 </div>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                {[{ label: "카카오맵", url: kakaoUrl }, { label: "구글맵", url: googleUrl }, { label: "애플맵", url: appleUrl }].map((b) => (
+                  <a key={b.label} href={b.url} target="_blank" rel="noopener noreferrer" className="nav-btn"
+                    style={{ flex: 1, textAlign: "center", background: "rgba(15,23,31,0.1)", border: "1px solid rgba(15,23,31,0.25)", borderRadius: 10, padding: "9px 4px", fontSize: 12.5, fontWeight: 700, color: "#1A1F26", textDecoration: "none" }}>
+                    {b.label}
+                  </a>
+                ))}
               </div>
-            )}
-            {!myPlace && (
-              <div style={{ textAlign: "center", fontSize: 11.5, opacity: 0.5, marginTop: 12 }}>내 위치를 설정하면 경로와 길찾기가 나타나요</div>
-            )}
+            </div>
           </SectionCard>
         </div>
 
@@ -1276,8 +1296,11 @@ export default function WeatherTideApp() {
 
         {/* 주변 탭 */}
         <div style={sec("nearby")}>
-          <PlaceListCard title="핫플" icon={MapPin} accent="#C792EA" dest={dest} items={sights} loading={sightsLoading} error={sights.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 장소를 찾지 못했어요." sourceNote={sightsSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} debugNote={sightsSource === "osm" ? kakaoError : ""} />
-          <PlaceListCard title="맛집" icon={Utensils} accent="#FF7A59" dest={dest} items={food} loading={foodLoading} error={food.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 음식점을 찾지 못했어요." sourceNote={foodSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} debugNote={foodSource === "osm" ? kakaoError : ""} />
+          <div style={{ fontSize: 11, opacity: 0.5, textAlign: "center" }}>
+            {myPlace ? "내 위치 기준으로 검색해요" : "내 위치가 없어 목적지 기준으로 검색해요"}
+          </div>
+          <PlaceListCard title="핫플" icon={MapPin} accent="#C792EA" dest={nearbyCenter} items={sights} loading={sightsLoading} error={sights.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 장소를 찾지 못했어요." sourceNote={sightsSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} debugNote={sightsSource === "osm" ? kakaoError : ""} />
+          <PlaceListCard title="맛집" icon={Utensils} accent="#FF7A59" dest={nearbyCenter} items={food} loading={foodLoading} error={food.length === 0 ? osmError : ""} emptyText="반경 5km 안에서 등록된 음식점을 찾지 못했어요." sourceNote={foodSource === "kakao" ? "카카오맵 제공" : "OpenStreetMap 제공"} debugNote={foodSource === "osm" ? kakaoError : ""} />
         </div>
       </div>
 
