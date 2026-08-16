@@ -1,13 +1,14 @@
 // Vercel 서버리스 함수
-// 카카오 로컬 API - 카테고리로 장소 검색 (음식점/카페)
-// 배포 후 /api/places?lat=..&lon=..&category=FD6&radius=5000 형태로 호출됨
+// 카카오 로컬 API - 카테고리 검색 또는 키워드(주소/장소명) 검색
+// 카테고리: /api/places?lat=..&lon=..&category=FD6&radius=5000
+// 키워드:   /api/places?lat=..&lon=..&query=포스코
 // REST API 키는 절대 프론트엔드에 노출하지 않고 이 서버 함수 안에서만 사용해요.
 
 export default async function handler(req, res) {
-  const { lat, lon, category, radius } = req.query;
+  const { lat, lon, category, query, radius } = req.query;
 
-  if (!lat || !lon || !category) {
-    return res.status(400).json({ error: "lat, lon, category 파라미터가 필요해요." });
+  if (!category && !query) {
+    return res.status(400).json({ error: "category 또는 query 파라미터가 필요해요." });
   }
 
   const restKey = process.env.KAKAO_REST_KEY;
@@ -17,16 +18,28 @@ export default async function handler(req, res) {
     });
   }
 
-  const params = new URLSearchParams({
-    category_group_code: category, // FD6: 음식점, CE7: 카페
-    x: lon,
-    y: lat,
-    radius: radius || "5000",
-    sort: "distance",
-    size: "15",
-  });
-
-  const url = `https://dapi.kakao.com/v2/local/search/category.json?${params.toString()}`;
+  let url;
+  if (query) {
+    const params = new URLSearchParams({ query, size: "10" });
+    if (lat && lon) {
+      params.set("x", lon);
+      params.set("y", lat);
+      params.set("radius", radius || "20000");
+      params.set("sort", "distance");
+    }
+    url = `https://dapi.kakao.com/v2/local/search/keyword.json?${params.toString()}`;
+  } else {
+    if (!lat || !lon) return res.status(400).json({ error: "lat, lon 파라미터가 필요해요." });
+    const params = new URLSearchParams({
+      category_group_code: category, // FD6: 음식점, CE7: 카페, AT4: 관광명소, CT1: 문화시설
+      x: lon,
+      y: lat,
+      radius: radius || "5000",
+      sort: "distance",
+      size: "15",
+    });
+    url = `https://dapi.kakao.com/v2/local/search/category.json?${params.toString()}`;
+  }
 
   try {
     const upstream = await fetch(url, {
