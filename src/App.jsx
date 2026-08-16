@@ -344,10 +344,20 @@ function LocationPicker({ label, value, onChange, list, matchKey = "name" }) {
 }
  
 // 좌표 기반 날씨 표시 (내 위치 / 목적지 공용)
+function airGrade(value, breakpoints) {
+  if (value == null) return { label: "-", color: "#9AA3AC" };
+  const [b1, b2, b3] = breakpoints;
+  if (value <= b1) return { label: "좋음", color: "#4FA8E0" };
+  if (value <= b2) return { label: "보통", color: "#7ED957" };
+  if (value <= b3) return { label: "나쁨", color: "#F4A63C" };
+  return { label: "매우나쁨", color: "#E14F4F" };
+}
+ 
 function WeatherBlock({ lat, lon }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [air, setAir] = useState(null);
  
   useEffect(() => {
     let cancelled = false;
@@ -357,6 +367,10 @@ function WeatherBlock({ lat, lon }) {
     fetch(url).then((r) => r.json()).then((j) => { if (!cancelled) setData(j); })
       .catch(() => { if (!cancelled) setError("날씨 정보를 불러오지 못했어요."); })
       .finally(() => { if (!cancelled) setLoading(false); });
+ 
+    const airUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=pm10,pm2_5&timezone=Asia%2FSeoul`;
+    fetch(airUrl).then((r) => r.json()).then((j) => { if (!cancelled) setAir(j?.current || null); }).catch(() => { if (!cancelled) setAir(null); });
+ 
     return () => { cancelled = true; };
   }, [lat, lon]);
  
@@ -373,6 +387,9 @@ function WeatherBlock({ lat, lon }) {
   if (error) return <div style={{ textAlign: "center", padding: "14px 0", fontSize: 12.5, opacity: 0.7 }}>{error}</div>;
   if (!data) return null;
  
+  const pm10Grade = air ? airGrade(air.pm10, [30, 80, 150]) : null;
+  const pm25Grade = air ? airGrade(air.pm2_5, [15, 35, 75]) : null;
+ 
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
@@ -382,7 +399,7 @@ function WeatherBlock({ lat, lon }) {
           <div style={{ fontSize: 12.5, opacity: 0.8, marginTop: 2 }}>{meta.label} · 체감 {Math.round(data.current.apparent_temperature)}°</div>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 8 }}>
         {[
           { icon: Droplets, label: "습도", value: `${data.current.relative_humidity_2m}%` },
           { icon: Wind, label: "바람", value: `${Math.round(data.current.wind_speed_10m)}km/h` },
@@ -395,6 +412,24 @@ function WeatherBlock({ lat, lon }) {
           </div>
         ))}
       </div>
+ 
+      {air && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6, marginBottom: 12 }}>
+          {[
+            { label: "미세먼지", value: air.pm10, unit: "㎍/㎥", grade: pm10Grade },
+            { label: "초미세먼지", value: air.pm2_5, unit: "㎍/㎥", grade: pm25Grade },
+          ].map((s) => (
+            <div key={s.label} style={{ background: "rgba(15,23,31,0.07)", borderRadius: 10, padding: "7px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 10, opacity: 0.65 }}>{s.label}</div>
+                <div className="sg" style={{ fontSize: 12.5, fontWeight: 700 }}>{Math.round(s.value)}<span style={{ fontSize: 9.5, opacity: 0.6, fontFamily: "'Noto Sans KR', sans-serif" }}> {s.unit}</span></div>
+              </div>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: s.grade.color, background: `${s.grade.color}1A`, borderRadius: 8, padding: "3px 7px" }}>{s.grade.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+ 
       <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
         {hourly.map((h, i) => {
           const hm = weatherMeta(h.code, 1);
