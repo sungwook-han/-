@@ -276,13 +276,14 @@ function leafletDivIcon(L, color, label) {
   });
 }
 
-function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height = 240 }) {
+function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, polygons, height = 240 }) {
   const [L, setL] = useState(null);
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const layersRef = useRef([]);
   const routeLayerRef = useRef(null);
   const poiLayersRef = useRef([]);
+  const polyLayersRef = useRef([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -316,6 +317,17 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
 
   useEffect(() => {
     if (!L || !mapRef.current) return;
+    polyLayersRef.current.forEach((m) => mapRef.current.removeLayer(m));
+    polyLayersRef.current = [];
+    (polygons || []).forEach((pg) => {
+      const m = L.polygon(pg.points, { color: pg.color || "#7ED957", weight: 2, fillColor: pg.color || "#7ED957", fillOpacity: 0.25 }).addTo(mapRef.current);
+      if (pg.label) m.bindPopup(pg.label);
+      polyLayersRef.current.push(m);
+    });
+  }, [L, polygons]);
+
+  useEffect(() => {
+    if (!L || !mapRef.current) return;
     poiLayersRef.current.forEach((m) => mapRef.current.removeLayer(m));
     poiLayersRef.current = [];
     (poiMarkers || []).forEach((p) => {
@@ -336,9 +348,12 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, height
       layersRef.current.push(m);
       pts.push([mk.lat, mk.lon]);
     });
-    if (pts.length === 2) mapRef.current.fitBounds(pts, { padding: [40, 40], maxZoom: 10 });
+    if (polygons && polygons.length > 0) {
+      polygons.forEach((pg) => pg.points.forEach((p) => pts.push(p)));
+    }
+    if (pts.length >= 2) mapRef.current.fitBounds(pts, { padding: [40, 40], maxZoom: 10 });
     else if (pts.length === 1) mapRef.current.setView(pts[0], 9);
-  }, [L, markers]);
+  }, [L, markers, polygons]);
 
   const heightStyle = typeof height === "number" ? `${height}px` : height;
 
@@ -937,6 +952,197 @@ function PlaceListCard({ title, icon: Icon, accent, dest, items, loading, error,
 }
 
 // 경로 정보 + 길찾기 앱 연결 (OSRM 데모 서버 — 무료, 키 불필요)
+// ---------- 그늘길 산책 (태양 위치 + 공원/숲 기반 왕복 산책 코스) ----------
+// 태양의 방위각/고도각을 계산하는 표준 천문 공식(NOAA 근사식). 실제 건물 그림자까지는 계산하지 않고,
+// "태양이 지금 어느 쪽에 있는지"를 정확히 알려주는 참고 정보로만 써요.
+function solarPosition(date, lat, lon) {
+  const rad = Math.PI / 180;
+  const JD = date.getTime() / 86400000 + 2440587.5;
+  const n = JD - 2451545.0;
+  const L = (280.46 + 0.9856474 * n) % 360;
+  const g = (((357.528 + 0.9856003 * n) % 360) + 360) % 360;
+  const lambda = L + 1.915 * Math.sin(g * rad) + 0.02 * Math.sin(2 * g * rad);
+  const epsilon = 23.439 - 0.0000004 * n;
+  const alpha = (Math.atan2(Math.cos(epsilon * rad) * Math.sin(lambda * rad), Math.cos(lambda * rad)) / rad + 360) % 360;
+  const delta = Math.asin(Math.sin(epsilon * rad) * Math.sin(lambda * rad));
+  const gmst = (280.46061837 + 360.98564736629 * n) % 360;
+  let H = ((gmst + lon - alpha) % 360 + 360) % 360;
+  if (H > 180) H -= 360;
+  const Hr = H * rad, latR = lat * rad;
+  const altitude = Math.asin(Math.sin(latR) * Math.sin(delta) + Math.cos(latR) * Math.cos(delta) * Math.cos(Hr)) / rad;
+  let azimuth = (Math.atan2(-Math.sin(Hr), Math.cos(latR) * Math.tan(delta) - Math.sin(latR) * Math.cos(Hr)) / rad + 360) % 360;
+  return { altitude, azimuth };
+}
+function cardinalKo(deg) {
+  const dirs = ["북", "북북동", "북동", "동북동", "동", "동남동", "남동", "남남동", "남", "남남서", "남서", "서남서", "서", "서북서", "북서", "북북서"];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+const WALK_DURATIONS = [20, 30, 45, 60];
+const WALK_SPEED_KMH = 4.8;
+
+function useShadeWalk(myPlace) {
+  const [duration, setDuration] = useState(30);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const search = async (mins) => {
+    if (!myPlace) return;
+    setDuration(mins);
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      const targetOneWayKm = (WALK_SPEED_KMH * (mins / 60)) / 2;
+      const radius = Math.min(Math.max(targetOneWayKm * 1000 * 1.4, 800), 6000);
+      const query = `[out:json][timeout:20];
+(
+  way["leisure"="park"](around:${radius},${myPlace.lat},${myPlace.lon});
+  way["landuse"="forest"](around:${radius},${myPlace.lat},${myPlace.lon});
+  way["natural"="wood"](around:${radius},${myPlace.lat},${myPlace.lon});
+);
+out geom 20;`;
+      const endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.openstreetmap.ru/api/interpreter"];
+      const fetchOne = async (url) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 15000);
+        try {
+          const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: `data=${encodeURIComponent(query)}`, signal: ctrl.signal });
+          if (!r.ok) throw new Error("bad");
+          return await r.json();
+        } finally { clearTimeout(t); }
+      };
+      const data = await Promise.any(endpoints.map(fetchOne));
+      const candidates = (data.elements || [])
+        .filter((el) => el.geometry && el.geometry.length >= 4)
+        .map((el) => {
+          const pts = el.geometry.map((g) => [g.lat, g.lon]);
+          const clat = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+          const clon = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+          return { name: el.tags?.name || "이름 없는 녹지", points: pts, centroid: [clat, clon], straightKm: haversineKm(myPlace.lat, myPlace.lon, clat, clon) };
+        })
+        .sort((a, b) => Math.abs(a.straightKm - targetOneWayKm) - Math.abs(b.straightKm - targetOneWayKm))
+        .slice(0, 3);
+
+      if (candidates.length === 0) { setError("근처에서 걸을 만한 공원·숲을 찾지 못했어요."); setLoading(false); return; }
+
+      let best = null;
+      for (const c of candidates) {
+        try {
+          const rUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${myPlace.lon},${myPlace.lat};${c.centroid[1]},${c.centroid[0]}?overview=full&geometries=geojson`;
+          const rr = await fetch(rUrl);
+          const rj = await rr.json();
+          const r0 = rj.routes?.[0];
+          if (!r0) continue;
+          const oneWayKm = r0.distance / 1000;
+          const diff = Math.abs(oneWayKm - targetOneWayKm);
+          if (!best || diff < best.diff) {
+            best = { diff, park: c, route: r0.geometry.coordinates.map(([lon, lat]) => [lat, lon]), oneWayKm, oneWaySec: r0.duration };
+          }
+        } catch {}
+      }
+
+      if (!best) { setError("산책 경로를 계산하지 못했어요. 잠시 후 다시 시도해주세요."); setLoading(false); return; }
+
+      setResult({
+        parkName: best.park.name,
+        polygon: best.park.points,
+        route: best.route,
+        oneWayKm: best.oneWayKm,
+        roundKm: best.oneWayKm * 2,
+        roundSec: best.oneWaySec * 2,
+      });
+    } catch {
+      setError("그늘길 정보를 불러오지 못했어요.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { duration, result, loading, error, search };
+}
+
+function ShadeWalkCard({ myPlace }) {
+  const { duration, result, loading, error, search } = useShadeWalk(myPlace);
+  const sun = myPlace ? solarPosition(new Date(), myPlace.lat, myPlace.lon) : null;
+
+  if (!myPlace) {
+    return (
+      <SectionCard accent="#7ED957">
+        <div className="serif" style={{ fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+          🌳 그늘길 산책
+        </div>
+        <div style={{ fontSize: 12.5, opacity: 0.65, textAlign: "center", padding: "10px 0" }}>내 위치를 설정하면 근처 산책 코스를 추천해드려요.</div>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <SectionCard accent="#7ED957">
+      <div className="serif" style={{ fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        🌳 그늘길 산책 <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.5, background: "rgba(15,23,31,0.06)", borderRadius: 6, padding: "1px 6px" }}>베타</span>
+      </div>
+
+      {sun && (
+        <div style={{ fontSize: 11.5, opacity: 0.75, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+          <Sun size={13} color="#F4C463" />
+          {sun.altitude > 0
+            ? <>태양 위치: {cardinalKo(sun.azimuth)}쪽, 고도 {Math.round(sun.altitude)}° — 건물 옆 인도라면 대략 {cardinalKo((sun.azimuth + 180) % 360)}쪽이 더 그늘질 가능성이 높아요</>
+            : <>지금은 해가 없어서(밤/일출전) 그늘 방향은 의미가 없어요 — 코스만 참고해주세요</>}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {WALK_DURATIONS.map((m) => (
+          <button
+            key={m}
+            onClick={() => search(m)}
+            style={{
+              flex: 1, background: duration === m && result ? "#7ED957" : "rgba(15,23,31,0.06)",
+              color: duration === m && result ? "#0B2A0F" : "#1A1F26",
+              border: "1px solid rgba(15,23,31,0.12)", borderRadius: 10, padding: "8px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+            }}
+          >
+            {m}분
+          </button>
+        ))}
+      </div>
+
+      {loading && <div style={{ textAlign: "center", padding: "20px 0" }}><Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} /></div>}
+      {!loading && error && (
+        <div style={{ display: "flex", gap: 8, background: "rgba(224,142,69,0.15)", border: "1px solid rgba(224,142,69,0.4)", borderRadius: 10, padding: "10px 12px", fontSize: 12 }}>
+          <AlertTriangle size={14} style={{ flexShrink: 0, color: "#E08E45" }} /><div>{error}</div>
+        </div>
+      )}
+      {!loading && !error && result && (
+        <>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{result.parkName}까지 왕복</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              <span className="sg" style={{ fontWeight: 700 }}>{result.roundKm.toFixed(1)}km</span> · <span className="sg" style={{ fontWeight: 700 }}>{fmtDuration(result.roundSec)}</span> (도보 왕복 기준)
+            </div>
+          </div>
+          <LeafletMap
+            markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]}
+            route={result.route}
+            routeColor="#4FA83C"
+            polygons={[{ points: result.polygon, color: "#7ED957", label: result.parkName }]}
+            height={200}
+          />
+        </>
+      )}
+      {!loading && !error && !result && (
+        <div style={{ fontSize: 11.5, opacity: 0.55, textAlign: "center", padding: "6px 0" }}>원하는 산책 시간을 골라주세요</div>
+      )}
+
+      <div style={{ fontSize: 9.5, opacity: 0.4, marginTop: 10, lineHeight: 1.4 }}>
+        * 실제 나무 그늘/건물 그림자를 계산한 경로는 아니에요. 공원·숲 등 초록지대를 그늘 가능성이 높은 곳으로 보고 안내하는 참고용 코스예요.
+      </div>
+    </SectionCard>
+  );
+}
+
 function fmtDuration(sec) {
   const m = Math.round(sec / 60);
   if (m < 60) return `${m}분`;
@@ -1260,6 +1466,8 @@ export default function WeatherTideApp() {
               </div>
             </div>
           </SectionCard>
+
+          <ShadeWalkCard myPlace={myPlace} />
         </div>
 
         {/* 날씨 탭 */}
