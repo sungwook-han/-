@@ -3,7 +3,7 @@ import {
   Sun, Moon, Cloud, CloudSun, CloudMoon, CloudRain, CloudDrizzle,
   CloudSnow, CloudFog, CloudLightning, Wind, Droplets,
   Search, MapPin, Loader2, ChevronDown, ChevronLeft, ChevronRight,
-  ArrowUp, ArrowDown, AlertTriangle, Anchor, CloudRainWind, Navigation, Utensils, Compass, Maximize2, X,
+  ArrowUp, ArrowDown, AlertTriangle, Anchor, CloudRainWind, Navigation, Utensils, Compass, Maximize2, X, Footprints,
 } from "lucide-react";
 
 // 내 위치를 못 가져올 때 수동 선택용 (내륙 포함 주요 도시)
@@ -952,9 +952,38 @@ function PlaceListCard({ title, icon: Icon, accent, dest, items, loading, error,
 }
 
 // 경로 정보 + 길찾기 앱 연결 (OSRM 데모 서버 — 무료, 키 불필요)
-// ---------- 그늘길 산책 (태양 위치 + 공원/숲 기반 왕복 산책 코스) ----------
-// 태양의 방위각/고도각을 계산하는 표준 천문 공식(NOAA 근사식). 실제 건물 그림자까지는 계산하지 않고,
-// "태양이 지금 어느 쪽에 있는지"를 정확히 알려주는 참고 정보로만 써요.
+// ---------- 산책 탭 (낮: 그늘 산책 / 밤: 안전 귀가길) ----------
+
+// 여러 Overpass 미러 서버에 동시 요청해서 가장 먼저 응답하는 걸 사용 (무료, 키 불필요)
+async function overpassFetch(query, timeoutMs = 15000) {
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+  ];
+  const fetchOne = async (url) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: `data=${encodeURIComponent(query)}`, signal: ctrl.signal });
+      if (!r.ok) throw new Error("bad");
+      return await r.json();
+    } finally { clearTimeout(t); }
+  };
+  return Promise.any(endpoints.map(fetchOne));
+}
+
+function pointInPolygon(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][1], yi = poly[i][0], xj = poly[j][1], yj = poly[j][0];
+    const x = pt[1], y = pt[0];
+    const intersect = (yi > y !== yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 function solarPosition(date, lat, lon) {
   const rad = Math.PI / 180;
   const JD = date.getTime() / 86400000 + 2440587.5;
@@ -978,9 +1007,38 @@ function cardinalKo(deg) {
   return dirs[Math.round(deg / 22.5) % 16];
 }
 
+function uvGrade(uv) {
+  if (uv == null) return { label: "-", color: "#9AA3AC" };
+  if (uv < 3) return { label: "낮음", color: "#4FA8E0" };
+  if (uv < 6) return { label: "보통", color: "#7ED957" };
+  if (uv < 8) return { label: "높음", color: "#F4A63C" };
+  if (uv < 11) return { label: "매우높음", color: "#E8734A" };
+  return { label: "위험", color: "#E14F4F" };
+}
+
+function useSolarNow(place) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!place) { setData(null); return; }
+    let cancelled = false;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${place.lat}&longitude=${place.lon}&hourly=uv_index,direct_radiation,shortwave_radiation,cloud_cover&timezone=Asia%2FSeoul&forecast_days=1`;
+    fetch(url).then((r) => r.json()).then((j) => {
+      if (cancelled || !j.hourly) return;
+      const now = new Date().toISOString().slice(0, 13);
+      let idx = j.hourly.time.findIndex((t) => t.slice(0, 13) === now);
+      if (idx === -1) idx = 0;
+      setData({ uv: j.hourly.uv_index[idx], radiation: j.hourly.shortwave_radiation[idx], cloud: j.hourly.cloud_cover[idx] });
+    }).catch(() => { if (!cancelled) setData(null); });
+    return () => { cancelled = true; };
+  }, [place]);
+  return data;
+}
+
 const WALK_DURATIONS = [20, 30, 45, 60];
 const WALK_SPEED_KMH = 4.8;
 
+// 낮 모드: 목표 시간에 맞는 공원/숲을 찾고, 경로 후보(alternatives) 중 초록지대를 가장 많이
+// 지나는 경로를 골라요. (건물 그림자 계산이 아니라, 실제 도로망 + 녹지 데이터 기반 근사치예요)
 function useShadeWalk(myPlace) {
   const [duration, setDuration] = useState(30);
   const [result, setResult] = useState(null);
@@ -1002,43 +1060,46 @@ function useShadeWalk(myPlace) {
   way["landuse"="forest"](around:${radius},${myPlace.lat},${myPlace.lon});
   way["natural"="wood"](around:${radius},${myPlace.lat},${myPlace.lon});
 );
-out geom 20;`;
-      const endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.openstreetmap.ru/api/interpreter"];
-      const fetchOne = async (url) => {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 15000);
-        try {
-          const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: `data=${encodeURIComponent(query)}`, signal: ctrl.signal });
-          if (!r.ok) throw new Error("bad");
-          return await r.json();
-        } finally { clearTimeout(t); }
-      };
-      const data = await Promise.any(endpoints.map(fetchOne));
-      const candidates = (data.elements || [])
+out geom 25;`;
+      const data = await overpassFetch(query);
+      const greenAreas = (data.elements || [])
         .filter((el) => el.geometry && el.geometry.length >= 4)
         .map((el) => {
           const pts = el.geometry.map((g) => [g.lat, g.lon]);
           const clat = pts.reduce((s, p) => s + p[0], 0) / pts.length;
           const clon = pts.reduce((s, p) => s + p[1], 0) / pts.length;
           return { name: el.tags?.name || "이름 없는 녹지", points: pts, centroid: [clat, clon], straightKm: haversineKm(myPlace.lat, myPlace.lon, clat, clon) };
-        })
-        .sort((a, b) => Math.abs(a.straightKm - targetOneWayKm) - Math.abs(b.straightKm - targetOneWayKm))
-        .slice(0, 3);
+        });
 
-      if (candidates.length === 0) { setError("근처에서 걸을 만한 공원·숲을 찾지 못했어요."); setLoading(false); return; }
+      if (greenAreas.length === 0) { setError("근처에서 걸을 만한 공원·숲을 찾지 못했어요."); setLoading(false); return; }
+
+      const candidates = greenAreas.slice().sort((a, b) => Math.abs(a.straightKm - targetOneWayKm) - Math.abs(b.straightKm - targetOneWayKm)).slice(0, 3);
 
       let best = null;
       for (const c of candidates) {
         try {
-          const rUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${myPlace.lon},${myPlace.lat};${c.centroid[1]},${c.centroid[0]}?overview=full&geometries=geojson`;
+          const rUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${myPlace.lon},${myPlace.lat};${c.centroid[1]},${c.centroid[0]}?overview=full&geometries=geojson&alternatives=true`;
           const rr = await fetch(rUrl);
           const rj = await rr.json();
-          const r0 = rj.routes?.[0];
-          if (!r0) continue;
-          const oneWayKm = r0.distance / 1000;
+          const routes = rj.routes || [];
+          if (routes.length === 0) continue;
+
+          // 경로 후보 중 초록지대(공원/숲)를 가장 많이 지나는 경로 선택
+          let bestAlt = null;
+          for (const r0 of routes) {
+            const coords = r0.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+            let greenHits = 0;
+            for (let i = 0; i < coords.length; i += 3) {
+              if (greenAreas.some((g) => pointInPolygon(coords[i], g.points))) greenHits++;
+            }
+            const greenRatio = greenHits / Math.max(1, Math.ceil(coords.length / 3));
+            if (!bestAlt || greenRatio > bestAlt.greenRatio) bestAlt = { r0, coords, greenRatio, altCount: routes.length };
+          }
+
+          const oneWayKm = bestAlt.r0.distance / 1000;
           const diff = Math.abs(oneWayKm - targetOneWayKm);
           if (!best || diff < best.diff) {
-            best = { diff, park: c, route: r0.geometry.coordinates.map(([lon, lat]) => [lat, lon]), oneWayKm, oneWaySec: r0.duration };
+            best = { diff, park: c, route: bestAlt.coords, oneWayKm, oneWaySec: bestAlt.r0.duration, greenRatio: bestAlt.greenRatio, altCount: bestAlt.altCount };
           }
         } catch {}
       }
@@ -1047,11 +1108,13 @@ out geom 20;`;
 
       setResult({
         parkName: best.park.name,
-        polygon: best.park.points,
+        polygons: greenAreas.map((g) => ({ points: g.points, color: "#7ED957" })),
         route: best.route,
         oneWayKm: best.oneWayKm,
         roundKm: best.oneWayKm * 2,
         roundSec: best.oneWaySec * 2,
+        altCount: best.altCount,
+        greenRatio: best.greenRatio,
       });
     } catch {
       setError("그늘길 정보를 불러오지 못했어요.");
@@ -1063,81 +1126,215 @@ out geom 20;`;
   return { duration, result, loading, error, search };
 }
 
-function ShadeWalkCard({ myPlace }) {
-  const { duration, result, loading, error, search } = useShadeWalk(myPlace);
+// 밤 모드: 목적지까지 경로 후보 중 가로등/CCTV(OSM 태그 기반)가 가장 많은 경로를 선택해요.
+// 국내 OSM에는 가로등/CCTV 태깅이 아직 많지 않아서, 데이터가 부족하면 최단 경로로 안내하고 그 사실을 알려줘요.
+function useSafeWalk(myPlace, dest) {
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const search = async () => {
+    if (!myPlace || !dest) return;
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      const south = Math.min(myPlace.lat, dest.lat) - 0.006;
+      const north = Math.max(myPlace.lat, dest.lat) + 0.006;
+      const west = Math.min(myPlace.lon, dest.lon) - 0.006;
+      const east = Math.max(myPlace.lon, dest.lon) + 0.006;
+      const query = `[out:json][timeout:20];
+(
+  node["highway"="street_lamp"](${south},${west},${north},${east});
+  node["man_made"="surveillance"](${south},${west},${north},${east});
+);
+out 400;`;
+      let safetyPoints = [];
+      try {
+        const data = await overpassFetch(query);
+        safetyPoints = (data.elements || []).map((el) => ({ lat: el.lat, lon: el.lon, type: el.tags?.highway === "street_lamp" ? "lamp" : "cctv" }));
+      } catch {}
+
+      const rUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${myPlace.lon},${myPlace.lat};${dest.lon},${dest.lat}?overview=full&geometries=geojson&alternatives=true`;
+      const rr = await fetch(rUrl);
+      const rj = await rr.json();
+      const routes = rj.routes || [];
+      if (routes.length === 0) { setError("귀가 경로를 계산하지 못했어요."); setLoading(false); return; }
+
+      let best = null;
+      for (const r0 of routes) {
+        const coords = r0.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+        let score = 0;
+        for (let i = 0; i < coords.length; i += 4) {
+          for (const sp of safetyPoints) {
+            if (haversineKm(coords[i][0], coords[i][1], sp.lat, sp.lon) * 1000 < 40) { score++; break; }
+          }
+        }
+        if (!best || score > best.score) best = { r0, coords, score };
+      }
+
+      setResult({
+        route: best.coords,
+        distanceKm: best.r0.distance / 1000,
+        durationSec: best.r0.duration,
+        safetyPoints,
+        score: best.score,
+        altCount: routes.length,
+        sparseData: safetyPoints.length === 0,
+      });
+    } catch {
+      setError("안전 귀가길 정보를 불러오지 못했어요.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { result, loading, error, search };
+}
+
+function WalkTab({ myPlace, dest }) {
   const sun = myPlace ? solarPosition(new Date(), myPlace.lat, myPlace.lon) : null;
+  const isDay = sun ? sun.altitude > 0 : true;
+  const solar = useSolarNow(myPlace);
+  const shade = useShadeWalk(myPlace);
+  const safe = useSafeWalk(myPlace, dest);
 
   if (!myPlace) {
     return (
       <SectionCard accent="#7ED957">
-        <div className="serif" style={{ fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-          🌳 그늘길 산책
-        </div>
-        <div style={{ fontSize: 12.5, opacity: 0.65, textAlign: "center", padding: "10px 0" }}>내 위치를 설정하면 근처 산책 코스를 추천해드려요.</div>
+        <div className="serif" style={{ fontSize: 15, fontWeight: 900, marginBottom: 8 }}>🚶 산책</div>
+        <div style={{ fontSize: 12.5, opacity: 0.65, textAlign: "center", padding: "10px 0" }}>내 위치를 설정하면 산책 코스를 추천해드려요.</div>
       </SectionCard>
     );
   }
 
   return (
-    <SectionCard accent="#7ED957">
+    <SectionCard accent={isDay ? "#7ED957" : "#5A67D8"}>
       <div className="serif" style={{ fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        🌳 그늘길 산책 <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.5, background: "rgba(15,23,31,0.06)", borderRadius: 6, padding: "1px 6px" }}>베타</span>
+        {isDay ? "🌳 그늘 산책" : "🌙 안전 귀가길"}
+        <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.5, background: "rgba(15,23,31,0.06)", borderRadius: 6, padding: "1px 6px" }}>베타</span>
       </div>
 
       {sun && (
         <div style={{ fontSize: 11.5, opacity: 0.75, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
           <Sun size={13} color="#F4C463" />
-          {sun.altitude > 0
-            ? <>태양 위치: {cardinalKo(sun.azimuth)}쪽, 고도 {Math.round(sun.altitude)}° — 건물 옆 인도라면 대략 {cardinalKo((sun.azimuth + 180) % 360)}쪽이 더 그늘질 가능성이 높아요</>
-            : <>지금은 해가 없어서(밤/일출전) 그늘 방향은 의미가 없어요 — 코스만 참고해주세요</>}
+          {isDay
+            ? <>태양 위치: {cardinalKo(sun.azimuth)}쪽, 고도 {Math.round(sun.altitude)}° — 지금은 낮이라 그늘 산책 코스를 추천해요</>
+            : <>해가 져서(고도 {Math.round(sun.altitude)}°) 밤 모드예요 — 가로등·CCTV 위주 안전 귀가길을 추천해요</>}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-        {WALK_DURATIONS.map((m) => (
-          <button
-            key={m}
-            onClick={() => search(m)}
-            style={{
-              flex: 1, background: duration === m && result ? "#7ED957" : "rgba(15,23,31,0.06)",
-              color: duration === m && result ? "#0B2A0F" : "#1A1F26",
-              border: "1px solid rgba(15,23,31,0.12)", borderRadius: 10, padding: "8px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
-            }}
-          >
-            {m}분
-          </button>
-        ))}
-      </div>
-
-      {loading && <div style={{ textAlign: "center", padding: "20px 0" }}><Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} /></div>}
-      {!loading && error && (
-        <div style={{ display: "flex", gap: 8, background: "rgba(224,142,69,0.15)", border: "1px solid rgba(224,142,69,0.4)", borderRadius: 10, padding: "10px 12px", fontSize: 12 }}>
-          <AlertTriangle size={14} style={{ flexShrink: 0, color: "#E08E45" }} /><div>{error}</div>
-        </div>
-      )}
-      {!loading && !error && result && (
-        <>
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>{result.parkName}까지 왕복</div>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>
-              <span className="sg" style={{ fontWeight: 700 }}>{result.roundKm.toFixed(1)}km</span> · <span className="sg" style={{ fontWeight: 700 }}>{fmtDuration(result.roundSec)}</span> (도보 왕복 기준)
-            </div>
+      {isDay && solar && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 12 }}>
+          {(() => {
+            const g = uvGrade(solar.uv);
+            return (
+              <div style={{ background: "rgba(15,23,31,0.06)", borderRadius: 10, padding: "7px 4px", textAlign: "center" }}>
+                <div style={{ fontSize: 10, opacity: 0.65 }}>자외선지수</div>
+                <div className="sg" style={{ fontSize: 13, fontWeight: 700 }}>{Math.round(solar.uv)}</div>
+                <span style={{ fontSize: 9.5, fontWeight: 700, color: g.color }}>{g.label}</span>
+              </div>
+            );
+          })()}
+          <div style={{ background: "rgba(15,23,31,0.06)", borderRadius: 10, padding: "7px 4px", textAlign: "center" }}>
+            <div style={{ fontSize: 10, opacity: 0.65 }}>일사량</div>
+            <div className="sg" style={{ fontSize: 13, fontWeight: 700 }}>{Math.round(solar.radiation)}</div>
+            <span style={{ fontSize: 9.5, opacity: 0.6 }}>W/m²</span>
           </div>
-          <LeafletMap
-            markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]}
-            route={result.route}
-            routeColor="#4FA83C"
-            polygons={[{ points: result.polygon, color: "#7ED957", label: result.parkName }]}
-            height={200}
-          />
-        </>
+          <div style={{ background: "rgba(15,23,31,0.06)", borderRadius: 10, padding: "7px 4px", textAlign: "center" }}>
+            <div style={{ fontSize: 10, opacity: 0.65 }}>구름량</div>
+            <div className="sg" style={{ fontSize: 13, fontWeight: 700 }}>{Math.round(solar.cloud)}%</div>
+          </div>
+        </div>
       )}
-      {!loading && !error && !result && (
-        <div style={{ fontSize: 11.5, opacity: 0.55, textAlign: "center", padding: "6px 0" }}>원하는 산책 시간을 골라주세요</div>
+
+      {isDay ? (
+        <>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {WALK_DURATIONS.map((m) => (
+              <button key={m} onClick={() => shade.search(m)}
+                style={{ flex: 1, background: shade.duration === m && shade.result ? "#7ED957" : "rgba(15,23,31,0.06)", color: shade.duration === m && shade.result ? "#0B2A0F" : "#1A1F26", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 10, padding: "8px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                {m}분
+              </button>
+            ))}
+          </div>
+
+          {shade.loading && <div style={{ textAlign: "center", padding: "20px 0" }}><Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} /></div>}
+          {!shade.loading && shade.error && (
+            <div style={{ display: "flex", gap: 8, background: "rgba(224,142,69,0.15)", border: "1px solid rgba(224,142,69,0.4)", borderRadius: 10, padding: "10px 12px", fontSize: 12 }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, color: "#E08E45" }} /><div>{shade.error}</div>
+            </div>
+          )}
+          {!shade.loading && !shade.error && shade.result && (
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700 }}>{shade.result.parkName}까지 왕복</div>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  <span className="sg" style={{ fontWeight: 700 }}>{shade.result.roundKm.toFixed(1)}km</span> · <span className="sg" style={{ fontWeight: 700 }}>{fmtDuration(shade.result.roundSec)}</span> (도보 왕복 기준)
+                </div>
+                <div style={{ fontSize: 10.5, opacity: 0.55, marginTop: 2 }}>
+                  경로 후보 {shade.result.altCount}개 중 초록지대 통과 비율이 가장 높은 경로를 선택했어요 (약 {Math.round(shade.result.greenRatio * 100)}%)
+                </div>
+              </div>
+              <LeafletMap markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]} route={shade.result.route} routeColor="#4FA83C" polygons={shade.result.polygons} height={200} />
+            </>
+          )}
+          {!shade.loading && !shade.error && !shade.result && (
+            <div style={{ fontSize: 11.5, opacity: 0.55, textAlign: "center", padding: "6px 0" }}>원하는 산책 시간을 골라주세요</div>
+          )}
+        </>
+      ) : (
+        <>
+          {!dest && <div style={{ fontSize: 12, opacity: 0.6, textAlign: "center", padding: "10px 0" }}>상단에서 목적지를 먼저 설정해주세요.</div>}
+          {dest && !safe.result && !safe.loading && (
+            <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+              <button onClick={() => safe.search()} style={{ background: "#5A67D8", border: "none", color: "white", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                {dest.name}까지 안전 귀가길 찾기
+              </button>
+            </div>
+          )}
+          {safe.loading && <div style={{ textAlign: "center", padding: "20px 0" }}><Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} /></div>}
+          {!safe.loading && safe.error && (
+            <div style={{ display: "flex", gap: 8, background: "rgba(224,142,69,0.15)", border: "1px solid rgba(224,142,69,0.4)", borderRadius: 10, padding: "10px 12px", fontSize: 12 }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, color: "#E08E45" }} /><div>{safe.error}</div>
+            </div>
+          )}
+          {!safe.loading && !safe.error && safe.result && (
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700 }}>{dest.name}까지 안전 귀가길</div>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  <span className="sg" style={{ fontWeight: 700 }}>{safe.result.distanceKm.toFixed(1)}km</span> · <span className="sg" style={{ fontWeight: 700 }}>{fmtDuration(safe.result.durationSec)}</span> (도보 기준)
+                </div>
+                {safe.result.sparseData ? (
+                  <div style={{ fontSize: 10.5, color: "#E08E45", marginTop: 4 }}>
+                    이 지역은 가로등/CCTV 지도 데이터가 부족해서 최단 경로로 안내해요.
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 10.5, opacity: 0.55, marginTop: 2 }}>
+                    경로 후보 {safe.result.altCount}개 중 가로등·CCTV 근처를 가장 많이 지나는 경로를 선택했어요.
+                  </div>
+                )}
+              </div>
+              <LeafletMap
+                markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }, { ...dest, color: "#F4C463", label: dest.name }]}
+                route={safe.result.route}
+                routeColor="#5A67D8"
+                poiMarkers={safe.result.safetyPoints.map((p, i) => ({ ...p, id: i, name: p.type === "lamp" ? "가로등" : "CCTV", typeLabel: p.type === "lamp" ? "가로등" : "CCTV", color: p.type === "lamp" ? "#F4C463" : "#5A67D8" }))}
+                height={200}
+              />
+              <button onClick={() => safe.search()} style={{ width: "100%", marginTop: 10, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 10, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#1A1F26" }}>
+                다시 계산
+              </button>
+            </>
+          )}
+        </>
       )}
 
       <div style={{ fontSize: 9.5, opacity: 0.4, marginTop: 10, lineHeight: 1.4 }}>
-        * 실제 나무 그늘/건물 그림자를 계산한 경로는 아니에요. 공원·숲 등 초록지대를 그늘 가능성이 높은 곳으로 보고 안내하는 참고용 코스예요.
+        {isDay
+          ? "* 자외선지수·일사량은 기상 실측 기반 예보값(정확)이에요. 경로는 건물 그림자를 계산한 게 아니라, 실제 도로망에서 공원·숲 통과 비율이 높은 경로를 고른 참고용 코스예요."
+          : "* 가로등·CCTV 위치는 OpenStreetMap에 등록된 정보 기준이라 실제 설치 현황과 다르거나 빠진 곳이 있을 수 있어요. 참고용으로만 활용해주세요."}
       </div>
     </SectionCard>
   );
@@ -1302,6 +1499,7 @@ const TABS = [
   { key: "map", label: "지도", icon: MapPin, color: "#5AB8FF" },
   { key: "weather", label: "날씨", icon: Sun, color: "#F4C463" },
   { key: "tide", label: "물때", icon: Anchor, color: "#4FD6C0" },
+  { key: "walk", label: "산책", icon: Footprints, color: "#7ED957" },
   { key: "nearby", label: "주변", icon: Compass, color: "#C792EA" },
 ];
 
@@ -1466,8 +1664,11 @@ export default function WeatherTideApp() {
               </div>
             </div>
           </SectionCard>
+        </div>
 
-          <ShadeWalkCard myPlace={myPlace} />
+        {/* 산책 탭 */}
+        <div style={sec("walk")}>
+          <WalkTab myPlace={myPlace} dest={dest} />
         </div>
 
         {/* 날씨 탭 */}
