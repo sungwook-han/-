@@ -1116,8 +1116,8 @@ out geom 25;`;
         altCount: best.altCount,
         greenRatio: best.greenRatio,
       });
-    } catch {
-      setError("그늘길 정보를 불러오지 못했어요.");
+    } catch (e) {
+      setError(`그늘길 정보를 불러오지 못했어요: ${e?.message || e?.name || "알 수 없는 오류"}`);
     } finally {
       setLoading(false);
     }
@@ -1182,8 +1182,8 @@ out 400;`;
         altCount: routes.length,
         sparseData: safetyPoints.length === 0,
       });
-    } catch {
-      setError("안전 귀가길 정보를 불러오지 못했어요.");
+    } catch (e) {
+      setError(`안전 귀가길 정보를 불러오지 못했어요: ${e?.message || e?.name || "알 수 없는 오류"}`);
     } finally {
       setLoading(false);
     }
