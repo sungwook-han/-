@@ -1198,6 +1198,7 @@ function WalkTab({ myPlace, dest }) {
   const solar = useSolarNow(myPlace);
   const shade = useShadeWalk(myPlace);
   const safe = useSafeWalk(myPlace, dest);
+  const [mapBig, setMapBig] = useState(false);
 
   if (!myPlace) {
     return (
@@ -1276,7 +1277,12 @@ function WalkTab({ myPlace, dest }) {
                   경로 후보 {shade.result.altCount}개 중 초록지대 통과 비율이 가장 높은 경로를 선택했어요 (약 {Math.round(shade.result.greenRatio * 100)}%)
                 </div>
               </div>
-              <LeafletMap markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]} route={shade.result.route} routeColor="#4FA83C" polygons={shade.result.polygons} height={200} />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                <button onClick={() => setMapBig((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 8, padding: "4px 8px", fontSize: 11, fontWeight: 700, color: "#1A1F26", cursor: "pointer" }}>
+                  {mapBig ? <><X size={11} /> 작게 보기</> : <><Maximize2 size={11} /> 크게 보기</>}
+                </button>
+              </div>
+              <LeafletMap markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]} route={shade.result.route} routeColor="#4FA83C" polygons={shade.result.polygons} height={mapBig ? 420 : 200} />
             </>
           )}
           {!shade.loading && !shade.error && !shade.result && (
@@ -1316,12 +1322,17 @@ function WalkTab({ myPlace, dest }) {
                   </div>
                 )}
               </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                <button onClick={() => setMapBig((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 8, padding: "4px 8px", fontSize: 11, fontWeight: 700, color: "#1A1F26", cursor: "pointer" }}>
+                  {mapBig ? <><X size={11} /> 작게 보기</> : <><Maximize2 size={11} /> 크게 보기</>}
+                </button>
+              </div>
               <LeafletMap
                 markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }, { ...dest, color: "#F4C463", label: dest.name }]}
                 route={safe.result.route}
                 routeColor="#5A67D8"
                 poiMarkers={safe.result.safetyPoints.map((p, i) => ({ ...p, id: i, name: p.type === "lamp" ? "가로등" : "CCTV", typeLabel: p.type === "lamp" ? "가로등" : "CCTV", color: p.type === "lamp" ? "#F4C463" : "#5A67D8" }))}
-                height={200}
+                height={mapBig ? 420 : 200}
               />
               <button onClick={() => safe.search()} style={{ width: "100%", marginTop: 10, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 10, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#1A1F26" }}>
                 다시 계산
@@ -1538,9 +1549,10 @@ export default function WeatherTideApp() {
   const [mode, setMode] = useState("driving");
   const [tab, setTab] = useState("map");
   const [mapFullscreen, setMapFullscreen] = useState(false);
+  const myPlaceRef = useRef(myPlace);
+  useEffect(() => { myPlaceRef.current = myPlace; }, [myPlace]);
 
-  // 앱을 열면 버튼 클릭 없이 바로 내 위치를 시도해요 (권한 거부 시 조용히 무시 — 상단 칩에서 수동으로 다시 시도 가능)
-  useEffect(() => {
+  const requestMyLocation = () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -1556,7 +1568,15 @@ export default function WeatherTideApp() {
       () => {},
       { timeout: 8000 }
     );
-  }, []);
+  };
+
+  // 앱을 열면 버튼 클릭 없이 바로 내 위치를 시도해요 (권한 거부 시 조용히 무시 — 탭을 누를 때도 다시 시도해요)
+  useEffect(() => { requestMyLocation(); }, []);
+
+  const handleTabChange = (key) => {
+    setTab(key);
+    if (!myPlaceRef.current) requestMyLocation(); // 사용자 클릭(제스처) 시점에 다시 시도하면 위치 권한이 더 잘 잡혀요
+  };
 
   const { route, info, loading: routeLoading, error: routeError, color: routeColor, kakaoUrl, googleUrl, appleUrl } = NavigationPanel({ myPlace, dest, mode });
   const nearbyCenter = myPlace || dest; // 주변 탭은 내 위치(GPS)가 있으면 그걸 우선으로 검색해요
@@ -1713,7 +1733,7 @@ export default function WeatherTideApp() {
         </div>
       </div>
 
-      <TabBar active={tab} setActive={setTab} />
+      <TabBar active={tab} setActive={handleTabChange} />
 
       <div style={{ textAlign: "center", fontSize: 9.5, opacity: 0.35, padding: "0 20px 90px" }}>
         날씨: Open-Meteo · 물때: 국립해양조사원(공공데이터포털) · 지도/핫플: OpenStreetMap · 경로: OSRM
