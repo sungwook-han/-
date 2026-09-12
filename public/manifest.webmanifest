@@ -1,0 +1,17 @@
+{
+  "name": "가족여행",
+  "short_name": "가족여행",
+  "description": "가족 여행을 위한 날씨·물때·경로·산책 도우미",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFFFFF",
+  "theme_color": "#5AB8FF",
+  "lang": "ko",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}
