@@ -87,7 +87,19 @@ function findNearestStation(lat, lon) {
   }
   return { station: best, distanceKm: bestDist };
 }
-function AddressSearchBox({ onSelect }) {
+// 최근 검색한 목적지 저장 (배포된 사이트의 브라우저에 저장돼요 — 이 클로드 미리보기에서는 세션 동안만 유지)
+const RECENT_KEY = "familytrip_recent_destinations";
+function loadRecentDestinations() {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveRecentDestinations(list) {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch {}
+}
+
+function AddressSearchBox({ onSelect, quickPicks, placeholder }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
@@ -163,11 +175,25 @@ function AddressSearchBox({ onSelect }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => results.length && setOpen(true)}
-          placeholder="주소 또는 지명 검색 (예: 여수시 돌산읍)"
+          placeholder={placeholder || "주소 또는 지명 검색 (예: 여수시 돌산읍)"}
           style={{ background: "none", border: "none", outline: "none", color: "#1A1F26", fontSize: 12.5, width: "100%" }}
         />
         {searching && <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />}
       </div>
+      {quickPicks && quickPicks.length > 0 && !open && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
+          <span style={{ fontSize: 10, opacity: 0.45, alignSelf: "center" }}>최근:</span>
+          {quickPicks.map((p, i) => (
+            <button
+              key={i}
+              onClick={() => { onSelect(p); setQuery(p.name); }}
+              style={{ background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 12, padding: "3px 9px", fontSize: 11, color: "#1A1F26", cursor: "pointer" }}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
       {open && results.length > 0 && (
         <div style={{ marginTop: 8, background: "#FAFAFA", borderRadius: 12, padding: 6, border: "1px solid rgba(15,23,31,0.12)", maxHeight: 240, overflowY: "auto" }}>
           {results.map((r) => (
@@ -1192,12 +1218,15 @@ out 400;`;
   return { result, loading, error, search };
 }
 
-function WalkTab({ myPlace, dest }) {
+function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
   const sun = myPlace ? solarPosition(new Date(), myPlace.lat, myPlace.lon) : null;
   const isDay = sun ? sun.altitude > 0 : true;
   const solar = useSolarNow(myPlace);
   const shade = useShadeWalk(myPlace);
-  const safe = useSafeWalk(myPlace, dest);
+  const [walkDest, setWalkDest] = useState(null); // 산책 탭 전용 목적지(여행 목적지와 분리) — 안 고르면 내 위치 근처로 안내
+  const [editingWalkDest, setEditingWalkDest] = useState(false);
+  const effectiveDest = walkDest || (myPlace ? { ...myPlace, name: "내 위치 근처" } : dest);
+  const safe = useSafeWalk(myPlace, effectiveDest);
   const [mapBig, setMapBig] = useState(false);
 
   if (!myPlace) {
@@ -1291,11 +1320,34 @@ function WalkTab({ myPlace, dest }) {
         </>
       ) : (
         <>
-          {!dest && <div style={{ fontSize: 12, opacity: 0.6, textAlign: "center", padding: "10px 0" }}>상단에서 목적지를 먼저 설정해주세요.</div>}
-          {dest && !safe.result && !safe.loading && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontSize: 11.5, opacity: 0.6 }}>귀가 목적지</div>
+              <button
+                onClick={() => setEditingWalkDest((v) => !v)}
+                style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(90,103,216,0.12)", border: "1px solid rgba(90,103,216,0.4)", color: "#5A67D8", borderRadius: 12, padding: "4px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+              >
+                <MapPin size={12} /> {effectiveDest.name}
+              </button>
+            </div>
+            {editingWalkDest && (
+              <div style={{ marginTop: 8, background: "rgba(15,23,31,0.04)", border: "1px solid rgba(15,23,31,0.1)", borderRadius: 12, padding: 10 }}>
+                <AddressSearchBox
+                  placeholder="집·숙소 등 귀가 목적지 검색"
+                  quickPicks={recentDestinations}
+                  onSelect={(p) => { setWalkDest(p); addRecentDestination(p); setEditingWalkDest(false); }}
+                />
+              </div>
+            )}
+            <div style={{ fontSize: 10, opacity: 0.45, marginTop: 4 }}>
+              여행 목적지({dest.name})와는 별개예요 — 실제로 걸어서 갈 가까운 곳(집·숙소 등)을 골라주세요.
+            </div>
+          </div>
+
+          {!safe.result && !safe.loading && (
             <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
               <button onClick={() => safe.search()} style={{ background: "#5A67D8", border: "none", color: "white", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                {dest.name}까지 안전 귀가길 찾기
+                {effectiveDest.name}까지 안전 귀가길 찾기
               </button>
             </div>
           )}
@@ -1308,7 +1360,7 @@ function WalkTab({ myPlace, dest }) {
           {!safe.loading && !safe.error && safe.result && (
             <>
               <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 700 }}>{dest.name}까지 안전 귀가길</div>
+                <div style={{ fontSize: 13.5, fontWeight: 700 }}>{effectiveDest.name}까지 안전 귀가길</div>
                 <div style={{ fontSize: 12, opacity: 0.7 }}>
                   <span className="sg" style={{ fontWeight: 700 }}>{safe.result.distanceKm.toFixed(1)}km</span> · <span className="sg" style={{ fontWeight: 700 }}>{fmtDuration(safe.result.durationSec)}</span> (도보 기준)
                 </div>
@@ -1328,7 +1380,7 @@ function WalkTab({ myPlace, dest }) {
                 </button>
               </div>
               <LeafletMap
-                markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }, { ...dest, color: "#F4C463", label: dest.name }]}
+                markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }, { ...effectiveDest, color: "#F4C463", label: effectiveDest.name }]}
                 route={safe.result.route}
                 routeColor="#5A67D8"
                 poiMarkers={safe.result.safetyPoints.map((p, i) => ({ ...p, id: i, name: p.type === "lamp" ? "가로등" : "CCTV", typeLabel: p.type === "lamp" ? "가로등" : "CCTV", color: p.type === "lamp" ? "#F4C463" : "#5A67D8" }))}
@@ -1465,7 +1517,7 @@ function MyLocationEditor({ myPlace, setMyPlace, onDone }) {
   );
 }
 
-function LocationBar({ myPlace, setMyPlace, dest, setDest }) {
+function LocationBar({ myPlace, setMyPlace, dest, setDest, recentDestinations, addRecentDestination }) {
   const [editing, setEditing] = useState(null); // 'my' | 'dest' | null
 
   return (
@@ -1498,7 +1550,10 @@ function LocationBar({ myPlace, setMyPlace, dest, setDest }) {
       {editing === "my" && <MyLocationEditor myPlace={myPlace} setMyPlace={setMyPlace} onDone={() => setEditing(null)} />}
       {editing === "dest" && (
         <div style={{ marginTop: 10, background: "rgba(15,23,31,0.04)", border: "1px solid rgba(15,23,31,0.1)", borderRadius: 12, padding: 12 }}>
-          <AddressSearchBox onSelect={(p) => { setDest(p); setEditing(null); }} />
+          <AddressSearchBox
+            quickPicks={recentDestinations}
+            onSelect={(p) => { setDest(p); addRecentDestination(p); setEditing(null); }}
+          />
         </div>
       )}
     </div>
@@ -1527,6 +1582,7 @@ function TabBar({ active, setActive }) {
         return (
           <button
             key={t.key}
+            className="tab-btn"
             onClick={() => setActive(t.key)}
             style={{
               flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
@@ -1534,7 +1590,7 @@ function TabBar({ active, setActive }) {
               color: isActive ? t.color : "rgba(26,31,38,0.5)", padding: "4px 0",
             }}
           >
-            <t.icon size={19} />
+            <t.icon size={19} style={{ transition: "transform 0.15s ease", transform: isActive ? "scale(1.08)" : "scale(1)" }} />
             <span style={{ fontSize: 10.5, fontWeight: isActive ? 700 : 500 }}>{t.label}</span>
           </button>
         );
@@ -1543,14 +1599,56 @@ function TabBar({ active, setActive }) {
   );
 }
 
-export default function WeatherTideApp() {
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center", fontFamily: "'Noto Sans KR', sans-serif", background: "#FFFFFF", color: "#1A1F26" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🙁</div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>문제가 발생했어요</div>
+          <div style={{ fontSize: 13, opacity: 0.65, marginBottom: 18, maxWidth: 280 }}>
+            화면을 표시하는 중 오류가 났어요. 새로고침하면 대부분 해결돼요.
+          </div>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+            style={{ background: "#5AB8FF", border: "none", color: "#062024", borderRadius: 10, padding: "10px 20px", fontSize: 13.5, fontWeight: 700, cursor: "pointer" }}
+          >
+            새로고침
+          </button>
+          {this.state.error?.message && (
+            <div style={{ fontSize: 10, opacity: 0.4, marginTop: 20, maxWidth: 300, wordBreak: "break-word" }}>{String(this.state.error.message)}</div>
+          )}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function WeatherTideApp() {
   const [myPlace, setMyPlace] = useState(null);
   const [dest, setDest] = useState(DESTINATIONS[0]);
   const [mode, setMode] = useState("driving");
   const [tab, setTab] = useState("map");
   const [mapFullscreen, setMapFullscreen] = useState(false);
+  const [recentDestinations, setRecentDestinations] = useState(() => loadRecentDestinations());
   const myPlaceRef = useRef(myPlace);
   useEffect(() => { myPlaceRef.current = myPlace; }, [myPlace]);
+
+  const addRecentDestination = (place) => {
+    setRecentDestinations((prev) => {
+      const next = [place, ...prev.filter((p) => p.name !== place.name)].slice(0, 5);
+      saveRecentDestinations(next);
+      return next;
+    });
+  };
 
   const requestMyLocation = () => {
     if (!navigator.geolocation) return;
@@ -1601,7 +1699,7 @@ export default function WeatherTideApp() {
     ? [...sights, ...food].map((s) => ({ ...s, color: (SPOT_TYPES[s.type] || SPOT_TYPES.attraction).color, typeLabel: (SPOT_TYPES[s.type] || SPOT_TYPES.attraction).label }))
     : [];
 
-  const sec = (key) => ({ display: tab === key ? "flex" : "none", flexDirection: "column", gap: 16 });
+  const sec = (key) => ({ display: tab === key ? "flex" : "none", flexDirection: "column", gap: 16, animation: tab === key ? "fadeIn 0.25s ease" : "none" });
 
   return (
     <div style={{ minHeight: "100%", fontFamily: "'Noto Sans KR', sans-serif", background: "#FFFFFF", color: "#1A1F26" }}>
@@ -1615,13 +1713,17 @@ export default function WeatherTideApp() {
         .nav-btn { transition: transform 0.1s ease, background 0.15s ease; }
         .nav-btn:hover { background: rgba(15,23,31,0.16) !important; }
         .nav-btn:active { transform: scale(0.97); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .tab-btn { transition: color 0.15s ease, transform 0.1s ease; }
+        .tab-btn:active { transform: scale(0.9); }
       `}</style>
 
       <div style={{ padding: "20px 20px 0", textAlign: "center" }}>
         <h1 className="serif" style={{ fontSize: 19, fontWeight: 900, margin: 0 }}>가족여행</h1>
       </div>
 
-      <LocationBar myPlace={myPlace} setMyPlace={setMyPlace} dest={dest} setDest={setDest} />
+      <LocationBar myPlace={myPlace} setMyPlace={setMyPlace} dest={dest} setDest={setDest} recentDestinations={recentDestinations} addRecentDestination={addRecentDestination} />
 
       <div style={{ padding: "14px 20px 90px", maxWidth: 560, margin: "0 auto" }}>
         {/* 지도 탭 */}
@@ -1688,7 +1790,7 @@ export default function WeatherTideApp() {
 
         {/* 산책 탭 */}
         <div style={sec("walk")}>
-          <WalkTab myPlace={myPlace} dest={dest} />
+          <WalkTab myPlace={myPlace} dest={dest} recentDestinations={recentDestinations} addRecentDestination={addRecentDestination} />
         </div>
 
         {/* 날씨 탭 */}
@@ -1739,5 +1841,13 @@ export default function WeatherTideApp() {
         날씨: Open-Meteo · 물때: 국립해양조사원(공공데이터포털) · 지도/핫플: OpenStreetMap · 경로: OSRM
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <WeatherTideApp />
+    </ErrorBoundary>
   );
 }
