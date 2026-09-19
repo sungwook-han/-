@@ -1357,7 +1357,9 @@ function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
                   {mapBig ? <><X size={11} /> 작게 보기</> : <><Maximize2 size={11} /> 크게 보기</>}
                 </button>
               </div>
-              <LeafletMap markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]} route={shade.result.route} routeColor="#4FA83C" polygons={shade.result.polygons} photoMarkers={photos} height={mapBig ? "72vh" : 200} />
+              <div style={mapBig ? { width: "100vw", marginLeft: "calc(50% - 50vw)", marginRight: "calc(50% - 50vw)", padding: "0 8px", boxSizing: "border-box" } : {}}>
+                <LeafletMap markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]} route={shade.result.route} routeColor="#E14F4F" polygons={shade.result.polygons} photoMarkers={photos} height={mapBig ? "95vh" : 200} />
+              </div>
             </>
           )}
           {!shade.loading && !shade.error && !shade.result && (
@@ -1428,14 +1430,16 @@ function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
                   {mapBig ? <><X size={11} /> 작게 보기</> : <><Maximize2 size={11} /> 크게 보기</>}
                 </button>
               </div>
-              <LeafletMap
-                markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }, { ...effectiveDest, color: "#F4C463", label: effectiveDest.name }]}
-                route={safe.result.route}
-                routeColor="#5A67D8"
-                poiMarkers={safe.result.safetyPoints.map((p, i) => ({ ...p, id: i, name: p.type === "lamp" ? "가로등" : "CCTV", typeLabel: p.type === "lamp" ? "가로등" : "CCTV", color: p.type === "lamp" ? "#F4C463" : "#5A67D8" }))}
-                photoMarkers={photos}
-                height={mapBig ? "72vh" : 200}
-              />
+              <div style={mapBig ? { width: "100vw", marginLeft: "calc(50% - 50vw)", marginRight: "calc(50% - 50vw)", padding: "0 8px", boxSizing: "border-box" } : {}}>
+                <LeafletMap
+                  markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }, { ...effectiveDest, color: "#F4C463", label: effectiveDest.name }]}
+                  route={safe.result.route}
+                  routeColor="#5A67D8"
+                  poiMarkers={safe.result.safetyPoints.map((p, i) => ({ ...p, id: i, name: p.type === "lamp" ? "가로등" : "CCTV", typeLabel: p.type === "lamp" ? "가로등" : "CCTV", color: p.type === "lamp" ? "#F4C463" : "#5A67D8" }))}
+                  photoMarkers={photos}
+                  height={mapBig ? "95vh" : 200}
+                />
+              </div>
               <button onClick={() => safe.search()} style={{ width: "100%", marginTop: 10, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 10, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#1A1F26" }}>
                 다시 계산
               </button>
