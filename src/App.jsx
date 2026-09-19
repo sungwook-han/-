@@ -302,7 +302,7 @@ function leafletDivIcon(L, color, label) {
   });
 }
 
-function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, polygons, height = 240 }) {
+function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, polygons, photoMarkers, height = 240 }) {
   const [L, setL] = useState(null);
   const elRef = useRef(null);
   const mapRef = useRef(null);
@@ -310,6 +310,7 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, polygo
   const routeLayerRef = useRef(null);
   const poiLayersRef = useRef([]);
   const polyLayersRef = useRef([]);
+  const photoLayersRef = useRef([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -363,6 +364,24 @@ function LeafletMap({ markers, route, routeColor = "#5AB8FF", poiMarkers, polygo
       poiLayersRef.current.push(m);
     });
   }, [L, poiMarkers]);
+
+  useEffect(() => {
+    if (!L || !mapRef.current) return;
+    photoLayersRef.current.forEach((m) => mapRef.current.removeLayer(m));
+    photoLayersRef.current = [];
+    (photoMarkers || []).forEach((p) => {
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="width:38px;height:38px;border-radius:10px;border:2.5px solid white;box-shadow:0 2px 8px rgba(15,23,31,0.35);background-image:url('${p.dataUrl}');background-size:cover;background-position:center;"></div>`,
+        iconSize: [38, 38],
+        iconAnchor: [19, 19],
+      });
+      const m = L.marker([p.lat, p.lon], { icon })
+        .bindPopup(`<img src="${p.dataUrl}" style="width:180px;border-radius:8px;display:block;margin-bottom:4px;" /><div style="font-size:11px;color:#555;">${p.time}</div>`)
+        .addTo(mapRef.current);
+      photoLayersRef.current.push(m);
+    });
+  }, [L, photoMarkers]);
 
   useEffect(() => {
     if (!L || !mapRef.current) return;
@@ -1228,6 +1247,30 @@ function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
   const effectiveDest = walkDest || (myPlace ? { ...myPlace, name: "내 위치 근처" } : dest);
   const safe = useSafeWalk(myPlace, effectiveDest);
   const [mapBig, setMapBig] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const fileInputRef = useRef(null);
+
+  const handlePhotoCapture = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const finish = (lat, lon) => {
+        setPhotos((prev) => [...prev, { id: Date.now(), dataUrl: reader.result, lat, lon, time: new Date().toLocaleString("ko-KR", { hour: "2-digit", minute: "2-digit", month: "numeric", day: "numeric" }) }]);
+      };
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => finish(pos.coords.latitude, pos.coords.longitude),
+          () => finish(myPlace.lat, myPlace.lon),
+          { timeout: 5000 }
+        );
+      } else {
+        finish(myPlace.lat, myPlace.lon);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
 
   if (!myPlace) {
     return (
@@ -1306,12 +1349,15 @@ function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
                   경로 후보 {shade.result.altCount}개 중 초록지대 통과 비율이 가장 높은 경로를 선택했어요 (약 {Math.round(shade.result.greenRatio * 100)}%)
                 </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 6 }}>
+                <button onClick={() => fileInputRef.current?.click()} style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(90,168,60,0.12)", border: "1px solid rgba(90,168,60,0.4)", borderRadius: 8, padding: "4px 8px", fontSize: 11, fontWeight: 700, color: "#4FA83C", cursor: "pointer" }}>
+                  📷 사진 남기기{photos.length > 0 ? ` (${photos.length})` : ""}
+                </button>
                 <button onClick={() => setMapBig((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 8, padding: "4px 8px", fontSize: 11, fontWeight: 700, color: "#1A1F26", cursor: "pointer" }}>
                   {mapBig ? <><X size={11} /> 작게 보기</> : <><Maximize2 size={11} /> 크게 보기</>}
                 </button>
               </div>
-              <LeafletMap markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]} route={shade.result.route} routeColor="#4FA83C" polygons={shade.result.polygons} height={mapBig ? 420 : 200} />
+              <LeafletMap markers={[{ ...myPlace, color: "#5AB8FF", label: "내 위치" }]} route={shade.result.route} routeColor="#4FA83C" polygons={shade.result.polygons} photoMarkers={photos} height={mapBig ? "72vh" : 200} />
             </>
           )}
           {!shade.loading && !shade.error && !shade.result && (
@@ -1374,7 +1420,10 @@ function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
                   </div>
                 )}
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 6 }}>
+                <button onClick={() => fileInputRef.current?.click()} style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(90,103,216,0.12)", border: "1px solid rgba(90,103,216,0.4)", borderRadius: 8, padding: "4px 8px", fontSize: 11, fontWeight: 700, color: "#5A67D8", cursor: "pointer" }}>
+                  📷 사진 남기기{photos.length > 0 ? ` (${photos.length})` : ""}
+                </button>
                 <button onClick={() => setMapBig((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 8, padding: "4px 8px", fontSize: 11, fontWeight: 700, color: "#1A1F26", cursor: "pointer" }}>
                   {mapBig ? <><X size={11} /> 작게 보기</> : <><Maximize2 size={11} /> 크게 보기</>}
                 </button>
@@ -1384,7 +1433,8 @@ function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
                 route={safe.result.route}
                 routeColor="#5A67D8"
                 poiMarkers={safe.result.safetyPoints.map((p, i) => ({ ...p, id: i, name: p.type === "lamp" ? "가로등" : "CCTV", typeLabel: p.type === "lamp" ? "가로등" : "CCTV", color: p.type === "lamp" ? "#F4C463" : "#5A67D8" }))}
-                height={mapBig ? 420 : 200}
+                photoMarkers={photos}
+                height={mapBig ? "72vh" : 200}
               />
               <button onClick={() => safe.search()} style={{ width: "100%", marginTop: 10, background: "rgba(15,23,31,0.06)", border: "1px solid rgba(15,23,31,0.12)", borderRadius: 10, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#1A1F26" }}>
                 다시 계산
@@ -1399,6 +1449,20 @@ function WalkTab({ myPlace, dest, recentDestinations, addRecentDestination }) {
           ? "* 자외선지수·일사량은 기상 실측 기반 예보값(정확)이에요. 경로는 건물 그림자를 계산한 게 아니라, 실제 도로망에서 공원·숲 통과 비율이 높은 경로를 고른 참고용 코스예요."
           : "* 가로등·CCTV 위치는 OpenStreetMap에 등록된 정보 기준이라 실제 설치 현황과 다르거나 빠진 곳이 있을 수 있어요. 참고용으로만 활용해주세요."}
       </div>
+
+      {photos.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(15,23,31,0.08)" }}>
+          <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>이번 산책에서 남긴 사진</div>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
+            {photos.map((p) => (
+              <img key={p.id} src={p.dataUrl} alt="산책 사진" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+            ))}
+          </div>
+          <div style={{ fontSize: 9.5, opacity: 0.4, marginTop: 6 }}>사진은 이 화면을 벗어나거나 새로고침하면 사라져요 (별도로 저장되지 않아요).</div>
+        </div>
+      )}
+
+      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} style={{ display: "none" }} />
     </SectionCard>
   );
 }
